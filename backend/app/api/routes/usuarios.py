@@ -15,7 +15,7 @@ def crear_usuario(usuario_in: UsuarioCreate, db: Session = Depends(get_db)):
     if user_existente:
         raise HTTPException(status_code=400, detail="El correo ya está registrado en el sistema")
     
-    # 2. Encriptar la contraseña antes de guardar
+    # 2. Encriptar la contraseña y mapear TODOS los campos del modelo
     usuario_db = Usuario(
         email=usuario_in.email,
         nombre=usuario_in.nombre,
@@ -23,7 +23,9 @@ def crear_usuario(usuario_in: UsuarioCreate, db: Session = Depends(get_db)):
         rol=usuario_in.rol,
         zona=usuario_in.zona,
         departamento=usuario_in.departamento,
-        status=usuario_in.status
+        centro_costo=usuario_in.centro_costo,                    # Mapeado
+        status=usuario_in.status,
+        tecnico_preferente_id=usuario_in.tecnico_preferente_id   # Mapeado
     )
     
     db.add(usuario_db)
@@ -31,12 +33,20 @@ def crear_usuario(usuario_in: UsuarioCreate, db: Session = Depends(get_db)):
     db.refresh(usuario_db)
     return usuario_db
 
+# NUEVO ENDPOINT: Vital para el frontend
+@router.get("/me", response_model=UsuarioResponse)
+def obtener_usuario_actual(current_user: Usuario = Depends(get_current_user)):
+    """
+    Devuelve los datos del usuario que actualmente tiene sesión iniciada por JWT.
+    """
+    return current_user
+
 @router.get("/", response_model=List[UsuarioResponse])
 def listar_usuarios(
     skip: int = 0, 
     limit: int = 100, 
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user) # Protegemos la ruta
+    current_user: Usuario = Depends(get_current_user) # Ruta protegida
 ):
     # Solo listamos los usuarios que no han sido borrados (Soft Delete)
     usuarios = db.query(Usuario).filter(Usuario.is_active == True).offset(skip).limit(limit).all()
