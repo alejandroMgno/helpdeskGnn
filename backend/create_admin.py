@@ -1,32 +1,40 @@
-from app.db.database import SessionLocal
-from app.models.usuario import Usuario
+from app.db.database import engine, SessionLocal
+from app.db.base_class import Base
+
+# 🔴 IMPORTANTE: Debemos importar TODOS los modelos aquí antes de llamar a create_all()
+# para que SQLAlchemy sepa que existen y cree las tablas con las nuevas columnas.
+from app.models.usuario import Usuario, RolUsuario, StatusTecnico
+from app.models.activo import Activo, Marca, Proveedor, HistorialActivo
+from app.models.ticket import Ticket, ComentarioTicket, PrioridadSLA, StatusTicket
+from app.models.auditoria import RegistroAuditoria
 from app.core.security import get_password_hash
 
-def init_db():
+# Esto crea las tablas desde cero con la nueva estructura
+Base.metadata.create_all(bind=engine)
+
+def create_admin_user():
     db = SessionLocal()
-    
-    # Verificar si ya existe un admin
-    admin = db.query(Usuario).filter(Usuario.email == "admin@gnn.com").first()
-    
-    if not admin:
-        print("Creando usuario administrador principal...")
-        user = Usuario(
-            email="admin@gnn.com",
-            nombre="Administrador GNN",
-            hashed_password=get_password_hash("Zenit2026*"), # Contraseña segura encriptada
-            rol="admin",
-            zona="Corporativo",
-            departamento="TI",
-            status="activo"
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        print(f"✅ Administrador creado exitosamente: {user.email}")
-    else:
-        print("El administrador ya existe.")
-        
-    db.close()
+    try:
+        admin = db.query(Usuario).filter(Usuario.email == "admin@gnn.com").first()
+        if not admin:
+            nuevo_admin = Usuario(
+                nombre="Administrador GNN",
+                email="admin@gnn.com",
+                hashed_password=get_password_hash("admin123"), # Tu contraseña temporal
+                rol=RolUsuario.ADMIN,
+                status_tecnico=StatusTecnico.ACTIVO,
+                zona="Noroeste",
+                departamento="Sistemas"
+            )
+            db.add(nuevo_admin)
+            db.commit()
+            print("✅ SÚPER ADMIN CREADO CON ÉXITO. Base de datos actualizada.")
+        else:
+            print("⚠️ El admin ya existe.")
+    except Exception as e:
+        print(f"❌ Error al crear admin: {e}")
+    finally:
+        db.close()
 
 if __name__ == "__main__":
-    init_db()
+    create_admin_user()

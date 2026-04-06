@@ -1,22 +1,25 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
 
 class ActivoBase(BaseModel):
-    numero_serie: str
-    modelo: str
-    marca: str
-    proveedor: str
-    costo: float
+    etiqueta_gnn: str
+    nombre: str
+    serie: Optional[str] = None
+    categoria: str
+    status: Optional[str] = "activo"
 
 class ActivoCreate(ActivoBase):
-    pass
+    frecuencia_meses: Optional[int] = 0
+    usuario_id: Optional[int] = None
+    marca_id: Optional[int] = None
+    proveedor_id: Optional[int] = None
 
 class ActivoResponse(ActivoBase):
     id: int
-    is_active: bool
-    estatus_operativo: str
-    usuario_asignado_id: Optional[int]
+    usuario_id: Optional[int] = None
+    marca_id: Optional[int] = None
+    proveedor_id: Optional[int] = None
+    factura_url: Optional[str] = None
 
     class Config:
-        orm_mode = True # Permite leer objetos SQLAlchemy
+        from_attributes = True
