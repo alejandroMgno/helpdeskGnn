@@ -1,59 +1,39 @@
+# backend/app/services/sla_engine.py
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from app.models.ticket import PrioridadSLA, Ticket, StatusTicket
-from app.models.usuario import Usuario, RolUsuario, StatusTecnico
+from app.models.usuario import Usuario, StatusTecnico
 
-# Diccionario de horas según el SLA que pediste
-SLA_HORAS = {
-    PrioridadSLA.CRITICA: 2,
-    PrioridadSLA.ALTA: 8,
-    PrioridadSLA.MEDIA: 24,
-    PrioridadSLA.BAJA: 72
-}
+def calcular_vencimiento_sla(prioridad: str) -> datetime:
+    """Calcula la fecha de vencimiento basada en la prioridad."""
+    horas_sla = {
+        "Crítica": 2,
+        "Alta": 8,
+        "Media": 24,
+        "Baja": 48
+    }
+    horas_asignadas = horas_sla.get(prioridad, 24)
+    return datetime.utcnow() + timedelta(hours=horas_asignadas)
 
-def calcular_vencimiento_sla(prioridad: PrioridadSLA) -> datetime:
-    """Calcula la fecha límite de resolución del ticket basado en su prioridad"""
-    horas = SLA_HORAS.get(prioridad, 24) # Por defecto 24h
-    # Aquí en un futuro podemos agregar lógica para saltar fines de semana o fuera de horario
-    return datetime.utcnow() + timedelta(hours=horas)
-
-def asignar_tecnico_inteligente(db: Session, zona_ticket: str = None) -> int:
+def asignar_tecnico_inteligente(db: Session, solicitante_id: int) -> int | None:
     """
-    Encuentra al técnico ideal:
-    1. Que esté ACTIVO (ni comiendo, ni de vacaciones)
-    2. Que tenga la menor cantidad de tickets abiertos
-    3. (Opcional) Que sea de la misma zona
+    Intenta asignar al técnico base. Si está inactivo, ocupado, comiendo o de vacaciones, 
+    busca al de respaldo. Si no hay ninguno, lo manda a la cola general (None).
     """
-    # Buscar técnicos disponibles
-    query = db.query(Usuario).filter(
-        Usuario.rol == RolUsuario.TECNICO,
-        Usuario.status_tecnico == StatusTecnico.ACTIVO,
-        Usuario.is_deleted == False
-    )
+    solicitante = db.query(Usuario).filter(Usuario.id == solicitante_id).first()
+    if not solicitante:
+        return None
 
-    if zona_ticket:
-        # Si la empresa es muy grande, priorizamos técnicos de la misma zona (Norte, Sur, Noroeste)
-        tecnicos_zona = query.filter(Usuario.zona == zona_ticket).all()
-        tecnicos_disponibles = tecnicos_zona if tecnicos_zona else query.all()
-    else:
-        tecnicos_disponibles = query.all()
+    # 1. Intentar con el Técnico Base
+    if solicitante.tecnico_base_id:
+        titular = db.query(Usuario).filter(Usuario.id == solicitante.tecnico_base_id).first()
+        if titular and titular.status_tecnico == StatusTecnico.Activo:
+            return titular.id
 
-    if not tecnicos_disponibles:
-        return None # No hay nadie disponible, se queda en la bolsa general (Sin asignar)
+    # 2. Intentar con el Técnico de Respaldo
+    if solicitante.tecnico_secundario_id:
+        respaldo = db.query(Usuario).filter(Usuario.id == solicitante.tecnico_secundario_id).first()
+        if respaldo and respaldo.status_tecnico == StatusTecnico.Activo:
+            return respaldo.id
 
-    # Buscar el que tenga menos carga de trabajo (tickets abiertos o en progreso)
-    tecnico_ideal = None
-    menor_carga = float('inf')
-
-    for tecnico in tecnicos_disponibles:
-        carga = db.query(func.count(Ticket.id)).filter(
-            Ticket.tecnico_id == tecnico.id,
-            Ticket.status.in_([StatusTicket.ABIERTO, StatusTicket.EN_PROGRESO])
-        ).scalar()
-
-        if carga < menor_carga:
-            menor_carga = carga
-            tecnico_ideal = tecnico
-
-    return tecnico_ideal.id if tecnico_ideal else None
+    # 3. Nadie disponible (se queda en la cola sin asignar para que un Admin lo tome)
+    return None

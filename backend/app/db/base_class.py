@@ -1,12 +1,12 @@
-from sqlalchemy import Column, Integer, Boolean, DateTime
-from sqlalchemy.orm import declarative_base
-from datetime import datetime
+# backend/app/db/base_class.py
+from sqlalchemy.ext.declarative import as_declarative, declared_attr
 
-Base = declarative_base()
-
-class AuditBaseModel(Base):
-    __abstract__ = True
-    id = Column(Integer, primary_key=True, index=True)
-    is_active = Column(Boolean, default=True) # Soft Delete
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+@as_declarative()
+class Base:
+    id: any
+    __name__: str
+    
+    # Generar el nombre de la tabla automáticamente basado en el nombre de la clase
+    @declared_attr
+    def __tablename__(cls) -> str:
+        return cls.__name__.lower() + "s" # Ej: Usuario -> usuarios

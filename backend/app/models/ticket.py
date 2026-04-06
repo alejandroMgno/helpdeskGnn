@@ -1,55 +1,43 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Enum, Text
+# backend/app/models/ticket.py
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
 import enum
+from datetime import datetime
 from app.db.base_class import Base
 
-class PrioridadSLA(str, enum.Enum):
-    CRITICA = "critica" # 2h
-    ALTA = "alta"       # 8h
-    MEDIA = "media"     # 24h
-    BAJA = "baja"       # 72h
+class PrioridadTicket(str, enum.Enum):
+    Critica = "Crítica"
+    Alta = "Alta"
+    Media = "Media"
+    Baja = "Baja"
 
-class StatusTicket(str, enum.Enum):
-    ABIERTO = "abierto"
-    EN_PROGRESO = "en_progreso"
-    ESPERA_USUARIO = "espera_usuario"
-    CERRADO = "cerrado"
-    CANCELADO = "cancelado"
+class EstatusTicket(str, enum.Enum):
+    Abierto = "Abierto"
+    En_Progreso = "En Progreso"
+    Escalado = "Escalado"
+    Resuelto = "Resuelto"
+    Cerrado = "Cerrado"
 
 class Ticket(Base):
     __tablename__ = "tickets"
 
     id = Column(Integer, primary_key=True, index=True)
-    titulo = Column(String, index=True)
-    descripcion = Column(Text)
+    titulo = Column(String(200), nullable=False)
+    descripcion = Column(Text, nullable=False)
     
-    # SLA y Status
-    prioridad = Column(Enum(PrioridadSLA), default=PrioridadSLA.MEDIA)
-    status = Column(Enum(StatusTicket), default=StatusTicket.ABIERTO)
+    prioridad = Column(Enum(PrioridadTicket), default=PrioridadTicket.Media)
+    estatus = Column(Enum(EstatusTicket), default=EstatusTicket.Abierto)
+    
+    # Tiempos y SLA
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
-    fecha_vencimiento_sla = Column(DateTime) # Se calcula en el endpoint
-    fecha_cierre = Column(DateTime, nullable=True)
-    
-    # Evidencia
-    imagen_referencia_url = Column(String, nullable=True)
-    
-    # Usuarios involucrados
-    creador_id = Column(Integer, ForeignKey("usuarios.id"))
-    tecnico_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    fecha_actualizacion = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    fecha_vencimiento_sla = Column(DateTime, nullable=False)
+    fecha_resolucion = Column(DateTime, nullable=True)
     
     # Relaciones
-    creador = relationship("Usuario", foreign_keys=[creador_id], back_populates="tickets_creados")
-    tecnico = relationship("Usuario", foreign_keys=[tecnico_id], back_populates="tickets_asignados")
-    comentarios = relationship("ComentarioTicket", back_populates="ticket")
+    solicitante_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    tecnico_asignado_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
 
-class ComentarioTicket(Base):
-    __tablename__ = "comentarios_ticket"
-    id = Column(Integer, primary_key=True, index=True)
-    ticket_id = Column(Integer, ForeignKey("tickets.id"))
-    autor_id = Column(Integer, ForeignKey("usuarios.id"))
-    comentario = Column(Text)
-    imagen_url = Column(String, nullable=True)
-    fecha = Column(DateTime, default=datetime.utcnow)
-    
-    ticket = relationship("Ticket", back_populates="comentarios")
+    # ORM
+    solicitante = relationship("Usuario", foreign_keys=[solicitante_id])
+    tecnico_asignado = relationship("Usuario", foreign_keys=[tecnico_asignado_id])

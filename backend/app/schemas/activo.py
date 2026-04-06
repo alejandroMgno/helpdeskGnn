@@ -1,25 +1,20 @@
+# backend/app/schemas/activo.py
 from pydantic import BaseModel
 from typing import Optional
+from app.models.activo import TipoActivo, EstatusActivo
 
 class ActivoBase(BaseModel):
-    etiqueta_gnn: str
+    codigo: str
     nombre: str
-    serie: Optional[str] = None
-    categoria: str
-    status: Optional[str] = "activo"
+    tipo: TipoActivo = TipoActivo.Computo
+    estatus: EstatusActivo = EstatusActivo.Disponible
+    usuario_id: Optional[int] = None
 
 class ActivoCreate(ActivoBase):
-    frecuencia_meses: Optional[int] = 0
-    usuario_id: Optional[int] = None
-    marca_id: Optional[int] = None
-    proveedor_id: Optional[int] = None
+    pass
 
 class ActivoResponse(ActivoBase):
     id: int
-    usuario_id: Optional[int] = None
-    marca_id: Optional[int] = None
-    proveedor_id: Optional[int] = None
-    factura_url: Optional[str] = None
 
     class Config:
         from_attributes = True
