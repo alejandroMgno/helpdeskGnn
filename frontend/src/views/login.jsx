@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-
-const API_URL = 'http://localhost:8000/api/v1';
+import clienteAxios from '../api/axios'; // Importamos nuestro puente
 
 const Login = ({ setToken }) => {
   const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -12,26 +11,29 @@ const Login = ({ setToken }) => {
     setIsLoading(true);
     setError('');
 
+    // FastAPI exige los datos en formato URL Encoded
     const formData = new URLSearchParams();
     formData.append('username', loginData.email);
     formData.append('password', loginData.password);
 
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData
+      // Hacemos la petición POST al backend
+      const res = await clienteAxios.post('/auth/login', formData, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        localStorage.setItem('zenit_token', data.access_token);
-        setToken(data.access_token);
-      } else {
-        setError("Credenciales incorrectas");
-      }
+      // Si es exitoso, guardamos el token
+      const token = res.data.access_token;
+      localStorage.setItem('zenit_token', token);
+      setToken(token);
+
     } catch (err) {
-      setError("Error de comunicación con el servidor");
+      // Capturamos el error si las credenciales son incorrectas
+      if (err.response && err.response.status === 401) {
+        setError("Credenciales incorrectas");
+      } else {
+        setError("Error de comunicación con el servidor");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -46,15 +48,15 @@ const Login = ({ setToken }) => {
           <p className="text-cyan-400 font-bold uppercase tracking-[0.25em] text-[8px] opacity-80">Gas Natural del Noroeste</p>
         </div>
         <form onSubmit={handleLogin} className="space-y-5">
-          <input 
+          <input
             type="email" required placeholder="Correo Corporativo"
             className="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-white text-xs outline-none focus:bg-white/10 transition-all placeholder:text-white/20"
-            onChange={(e) => setLoginData({...loginData, email: e.target.value})}
+            onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
           />
-          <input 
+          <input
             type="password" required placeholder="Contraseña"
             className="w-full bg-white/5 border border-white/10 p-3.5 rounded-2xl text-white text-xs outline-none focus:bg-white/10 transition-all placeholder:text-white/20"
-            onChange={(e) => setLoginData({...loginData, password: e.target.value})}
+            onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
           />
           {error && <p className="text-red-400 text-[10px] text-center font-bold uppercase">{error}</p>}
           <button disabled={isLoading} className="w-full bg-cyan-500 hover:bg-cyan-400 py-4 rounded-2xl font-black text-white text-[10px] tracking-widest transition-all shadow-lg shadow-cyan-500/20 active:scale-95">

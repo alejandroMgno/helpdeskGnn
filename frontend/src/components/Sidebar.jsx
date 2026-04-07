@@ -1,14 +1,38 @@
+// frontend/src/components/Sidebar.jsx
 import React, { useState } from 'react';
+import clienteAxios from '../api/axios'; // <-- 1. Importamos nuestro puente de conexión
 
 const Sidebar = ({ user, setUser, vistaActual, setVista, handleLogout }) => {
   const [cambiandoStatus, setCambiandoStatus] = useState(false);
 
+  // ==========================================
+  // CONEXIÓN CON EL BACKEND (Actualizar Estatus)
+  // ==========================================
   const cambiarStatus = async (e) => {
     const nuevoStatus = e.target.value;
+    const statusAnterior = user.estado_disponibilidad; // Guardamos el estado previo por si hay error
+
     setCambiandoStatus(true);
-    // Aquí se integraría el PUT al backend más adelante
+
+    // 1. Actualización Optimista: Cambiamos la UI de inmediato para que se sienta súper rápido
     setUser({ ...user, estado_disponibilidad: nuevoStatus });
-    setCambiandoStatus(false);
+
+    try {
+      // 2. Le avisamos a la Base de Datos (Ajusta la URL según tu ruta en FastAPI)
+      // Asumiendo que tu ruta de actualización es algo como PUT /usuarios/{id}
+      await clienteAxios.put(`/usuarios/${user.id}`, {
+        ...user,
+        estado_disponibilidad: nuevoStatus
+      });
+
+    } catch (error) {
+      console.error("Error al actualizar disponibilidad:", error);
+      // 3. Si el servidor falla, revertimos el cambio visualmente y avisamos
+      setUser({ ...user, estado_disponibilidad: statusAnterior });
+      alert("No se pudo actualizar tu estado de disponibilidad en el servidor.");
+    } finally {
+      setCambiandoStatus(false);
+    }
   };
 
   const navItem = (id, label, svgPath, allowedRoles = ['Admin', 'Tecnico', 'Usuario', 'Normal']) => {
@@ -51,17 +75,19 @@ const Sidebar = ({ user, setUser, vistaActual, setVista, handleLogout }) => {
         </div>
       </div>
 
+      {/* Control de disponibilidad solo para Staff */}
       {['Admin', 'Tecnico'].includes(user?.rol) && (
         <div className="px-6 py-4 bg-slate-900 border-b border-slate-800">
-          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">
-            Mi Disponibilidad (SLA)
+          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block flex justify-between items-center">
+            <span>Mi Disponibilidad (SLA)</span>
+            {cambiandoStatus && <span className="w-2 h-2 rounded-full border-2 border-cyan-500 border-t-transparent animate-spin"></span>}
           </label>
           <div className="relative">
             <select
               value={user.estado_disponibilidad || "Activo"}
               onChange={cambiarStatus}
               disabled={cambiandoStatus}
-              className="w-full bg-slate-800 border border-slate-700 text-white text-xs font-bold rounded-lg px-3 py-2 outline-none focus:border-cyan-500 appearance-none cursor-pointer"
+              className={`w-full bg-slate-800 border ${cambiandoStatus ? 'border-slate-600 text-slate-500' : 'border-slate-700 text-white'} text-xs font-bold rounded-lg px-3 py-2 outline-none focus:border-cyan-500 appearance-none cursor-pointer transition-colors`}
             >
               <option value="Activo">🟢 Activo</option>
               <option value="Ocupado">🔴 Ocupado</option>
