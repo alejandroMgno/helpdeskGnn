@@ -30,11 +30,13 @@ app.add_middleware(
 )
 
 # Inyección de todos los módulos del sistema
-app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Autenticación"])
-app.include_router(usuarios.router, prefix=f"{settings.API_V1_STR}/usuarios", tags=["Usuarios"])
+# backend/app/main.py
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(usuarios.router, prefix="/api/v1/usuarios", tags=["usuarios"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(tickets.router, prefix=f"{settings.API_V1_STR}/tickets", tags=["Tickets (SLA)"])
 app.include_router(activos.router, prefix=f"{settings.API_V1_STR}/activos", tags=["Inventario"])
-app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}/dashboard", tags=["Métricas"])
+
 
 @app.get("/")
 def root():

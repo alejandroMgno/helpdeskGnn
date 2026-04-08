@@ -1,52 +1,64 @@
 # backend/app/api/routes/tickets.py
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
+from typing import List, Optional
+from datetime import datetime
 from app.api.dependencies import get_db, get_current_user
 from app.models.usuario import Usuario
-from app.models.ticket import Ticket
-from app.schemas.ticket import TicketCreate, TicketResponse
-from app.services.sla_engine import calcular_vencimiento_sla, asignar_tecnico_inteligente
+from app.models.ticket import Ticket, EstatusTicket, Comentario
 
 router = APIRouter()
 
-@router.post("/", response_model=TicketResponse)
-def crear_ticket(
-    ticket_in: TicketCreate, 
-    db: Session = Depends(get_db), 
+@router.get("/{ticket_id}/comentarios")
+def obtener_comentarios(ticket_id: int, db: Session = Depends(get_db)):
+    coms = db.query(Comentario).filter(Comentario.ticket_id == ticket_id).all()
+    return [{
+        "id": c.id,
+        "autor": c.autor.nombre_completo,
+        "rol": c.autor.rol,
+        "texto": c.texto,
+        "fecha": c.fecha.strftime("%d %b, %I:%M %p"),
+        "avatar": f"https://ui-avatars.com/api/?name={c.autor.nombre_completo}",
+        "adjunto_url": c.adjunto_url,  # Soporte para imágenes
+        "adjunto_nombre": c.adjunto_nombre
+    } for c in coms]
+
+@router.put("/{ticket_id}/estatus")
+def actualizar_estatus(
+    ticket_id: int, 
+    nuevo_estatus: str = Body(..., embed=True), 
+    db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    """Crea un nuevo ticket y asigna automáticamente el técnico y el SLA."""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket: raise HTTPException(404, "Ticket no encontrado")
     
-    tecnico_id = asignar_tecnico_inteligente(db, current_user.id)
-    vencimiento = calcular_vencimiento_sla(ticket_in.prioridad.value)
-
-    nuevo_ticket = Ticket(
-        titulo=ticket_in.titulo,
-        descripcion=ticket_in.descripcion,
-        prioridad=ticket_in.prioridad,
-        solicitante_id=current_user.id,
-        tecnico_asignado_id=tecnico_id,
-        fecha_vencimiento_sla=vencimiento
+    ticket.estatus = nuevo_estatus
+    
+    # Registro automático en el chat
+    log = Comentario(
+        ticket_id=ticket_id,
+        autor_id=current_user.id,
+        texto=f"SISTEMA: Estatus cambiado a {nuevo_estatus}",
     )
-    
-    db.add(nuevo_ticket)
+    db.add(log)
     db.commit()
-    db.refresh(nuevo_ticket)
-    return nuevo_ticket
+    return {"status": "updated"}
 
-@router.get("/", response_model=List[TicketResponse])
-def listar_tickets(
+@router.post("/{ticket_id}/comentarios")
+def agregar_comentario(
+    ticket_id: int, 
+    data: dict, 
     db: Session = Depends(get_db), 
     current_user: Usuario = Depends(get_current_user)
 ):
-    """Lista los tickets. Si es admin, ve todos. Si es usuario/técnico, ve los suyos."""
-    if current_user.rol.value == "Admin":
-        tickets = db.query(Ticket).all()
-    else:
-        # Ve los que creó o los que le asignaron
-        tickets = db.query(Ticket).filter(
-            (Ticket.solicitante_id == current_user.id) | 
-            (Ticket.tecnico_asignado_id == current_user.id)
-        ).all()
-    return tickets
+    nuevo = Comentario(
+        ticket_id=ticket_id, 
+        autor_id=current_user.id, 
+        texto=data.get('texto', ''),
+        adjunto_url=data.get('adjunto_url'), # Guardamos la URL de la imagen
+        adjunto_nombre=data.get('adjunto_nombre')
+    )
+    db.add(nuevo)
+    db.commit()
+    return {"status": "ok"}

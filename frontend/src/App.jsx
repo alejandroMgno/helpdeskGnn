@@ -1,12 +1,17 @@
+// frontend/src/App.jsx
 import React, { useState, useEffect } from 'react';
 import clienteAxios from './api/axios'; // Importamos el puente
-import Login from "./views/Login";
+import Login from "./views/login";
 import Sidebar from "./components/Sidebar";
-import Dashboard from "./views/Dashboard";
 
-// Importa el resto de tus vistas aquí (Inventario, Usuarios, etc.)
-// import Inventario from "./views/inventario";
-// import MesaAyuda from "./views/mesaAyuda";
+// IMPORTAMOS TODAS TUS VISTAS REALES
+import Dashboard from "./views/dashboard";
+import Conocimiento from "./views/conocimientos";
+import MesaAyuda from "./views/mesaAyuda";
+import Inventario from "./views/inventario";
+import Licencias from "./views/licencias";
+import Usuarios from "./views/usuarios";
+import Reportes from "./views/reportes";
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('zenit_token'));
@@ -58,20 +63,37 @@ function App() {
     return <Login setToken={setToken} />;
   }
 
-  // Renderizador de Vistas
+  // Renderizador de Vistas: AQUÍ ESTÁ LA MAGIA PARA QUE EL SIDEBAR FUNCIONE
   const renderView = () => {
     switch (vista) {
-      case 'dashboard': return <Dashboard user={user} setVista={setVista} />;
-      // Descomenta y agrega tus otras vistas cuando las tengas listas
-      // case 'tickets': return <MesaAyuda user={user} />;
-      // case 'inventario': return <Inventario user={user} />;
-      default: return <Dashboard user={user} setVista={setVista} />;
+      case 'dashboard':
+        return <Dashboard user={user} setVista={setVista} />;
+      case 'tickets':
+        return <MesaAyuda user={user} />;
+      case 'conocimiento':
+        return <Conocimiento user={user} token={token} />;
+      case 'inventario':
+        return <Inventario user={user} />;
+      case 'licencias':
+        return <Licencias user={user} />;
+      case 'usuarios':
+        return <Usuarios user={user} />;
+      case 'reportes':
+        return <Reportes user={user} />;
+      default:
+        return <Dashboard user={user} setVista={setVista} />;
     }
   };
 
   return (
     <div className="flex h-screen bg-slate-950 overflow-hidden font-sans text-slate-300">
-      <Sidebar user={user} setUser={setUser} vistaActual={vista} setVista={setVista} handleLogout={handleLogout} />
+      <Sidebar
+        user={user}
+        setUser={setUser}
+        vistaActual={vista}
+        setVista={setVista}
+        handleLogout={handleLogout}
+      />
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Topbar */}
@@ -98,6 +120,7 @@ function App() {
 
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           <div className="max-w-7xl mx-auto">
+            {/* Aquí se inyecta la vista que elijas en el Sidebar */}
             {renderView()}
           </div>
         </div>

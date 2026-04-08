@@ -14,12 +14,12 @@ class EstatusUsuario(str, enum.Enum):
     Activo = "Activo"
     Inactivo = "Inactivo"
 
-# ¡Añadido para que tu sla_engine.py funcione!
 class StatusTecnico(str, enum.Enum):
     Activo = "Activo"
     Ocupado = "Ocupado"
     Comiendo = "Comiendo"
     Vacaciones = "Vacaciones"
+    Fuera_de_Oficina = "Fuera_de_Oficina" 
 
 class Usuario(Base):
     __tablename__ = "usuarios"

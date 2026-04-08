@@ -6,6 +6,8 @@ from app.api.dependencies import get_db, get_current_user
 from app.schemas.usuario import UsuarioCreate, UsuarioResponse, UsuarioUpdate
 from app.models.usuario import Usuario
 from app.core.security import get_password_hash
+from fastapi import Request
+
 
 router = APIRouter()
 
@@ -30,3 +32,26 @@ def create_usuario(*, db: Session = Depends(get_db), user_in: UsuarioCreate, cur
     db.commit()
     db.refresh(nuevo_usuario)
     return nuevo_usuario
+
+@router.put("/{usuario_id}")
+async def update_estado_usuario(
+    usuario_id: int, 
+    request: Request, # Recibimos todo el JSON de React de forma dinámica
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    
+    if not usuario:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    datos_actualizacion = await request.json()
+    
+    # Si React nos mandó el nuevo estado, lo inyectamos a tu BD
+    if "status_tecnico" in datos_actualizacion:
+        usuario.status_tecnico = datos_actualizacion["status_tecnico"]
+        db.commit()
+        db.refresh(usuario)
+        
+    return usuario
