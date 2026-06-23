@@ -2,12 +2,15 @@
 import pandas as pd
 import io
 from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, BackgroundTasks
 from sqlalchemy.orm import Session
+import secrets
 from app.api.dependencies import get_db, get_current_active_user
 from app.schemas.usuario import UsuarioCreate, UsuarioResponse, UsuarioUpdate
 from app.models.usuario import Usuario, StatusTecnico, RolUsuario, HorarioLaboral
 from app.core.security import get_password_hash
+from app.services.email_service import enviar_email
+from app.core.config import settings
 from datetime import datetime
 from app.services.websocket_manager import manager
 
@@ -157,6 +160,7 @@ def read_usuarios(
 @router.post("/", response_model=UsuarioResponse)
 def create_usuario(
     user_in: UsuarioCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_active_user)
 ):
@@ -172,10 +176,29 @@ def create_usuario(
     user_data = user_in.model_dump(exclude={"password"})
     user_data["hashed_password"] = get_password_hash(user_in.password)
     
+    # Generar token de verificación
+    verification_token = secrets.token_urlsafe(32)
+    user_data["email_verification_token"] = verification_token
+    user_data["is_email_verified"] = False
+    
     nuevo_usuario = Usuario(**user_data)
     db.add(nuevo_usuario)
     db.commit()
     db.refresh(nuevo_usuario)
+    
+    # Enviar correo de verificación
+    verification_link = f"{settings.FRONTEND_URL}/verify-email/{verification_token}"
+    html = f"""
+    <html>
+        <body>
+            <h2>Bienvenido a {settings.PROJECT_NAME}</h2>
+            <p>Por favor, haz clic en el siguiente enlace para activar tu cuenta:</p>
+            <a href="{verification_link}">{verification_link}</a>
+        </body>
+    </html>
+    """
+    background_tasks.add_task(enviar_email, nuevo_usuario.email, "Activa tu cuenta", html)
+    
     return nuevo_usuario
 
 @router.put("/{usuario_id}", response_model=UsuarioResponse)

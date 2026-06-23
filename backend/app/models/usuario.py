@@ -100,6 +100,10 @@ class Usuario(Base):
 
     debe_cambiar_password = Column(Boolean, default=False)
 
+    # Email verification
+    is_email_verified = Column(Boolean, default=False)
+    email_verification_token = Column(String(100), nullable=True)
+
     is_active = Column(Boolean, default=True)
     fecha_creacion = Column(DateTime, default=datetime.utcnow)
     fecha_actualizacion = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

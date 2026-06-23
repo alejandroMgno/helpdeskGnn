@@ -25,6 +25,10 @@ async def login_access_token(db: Session = Depends(get_db), form_data: OAuth2Pas
     if user.estatus == EstatusUsuario.Inactivo:
         raise HTTPException(status_code=400, detail="Usuario inactivo. Contacte al administrador.")
         
+    # VERIFICACIÓN DE EMAIL
+    if not user.is_email_verified:
+        raise HTTPException(status_code=400, detail="Cuenta no verificada. Revisa tu correo.")
+        
     # ✅ LÓGICA DE PRESENCIA: Si es técnico, inicia como Activo
     if user.rol in [RolUsuario.Tecnico, RolUsuario.Admin]:
         user.status_tecnico = StatusTecnico.Activo
@@ -45,6 +49,18 @@ async def login_access_token(db: Session = Depends(get_db), form_data: OAuth2Pas
             "avatar_url": f"https://ui-avatars.com/api/?name={user.nombre_completo.replace(' ', '+')}&background=0891b2&color=fff"
         }
     }
+
+@router.post("/verify-email/{token}")
+async def verify_email(token: str, db: Session = Depends(get_db)):
+    user = db.query(Usuario).filter(Usuario.email_verification_token == token).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Token inválido")
+    
+    user.is_email_verified = True
+    user.email_verification_token = None
+    db.commit()
+    return {"message": "Cuenta verificada correctamente"}
+
 
 @router.post("/forgot-password")
 async def forgot_password(email: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
