@@ -1,291 +1,388 @@
-// frontend/src/views/Dashboard.jsx
+// frontend/src/views/dashboard.jsx
 import React, { useState, useEffect } from 'react';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  AreaChart, Area, PieChart, Pie, Cell 
+} from 'recharts';
 import clienteAxios from '../api/axios';
 
-const Dashboard = ({ user, setVista }) => {
-  const primerNombre = user?.nombre_completo ? user.nombre_completo.split(' ')[0] : 'Usuario';
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
-  const [stats, setStats] = useState(null);
+const Dashboard = ({ user, setVista }) => {
+  const [data, setData] = useState(null);
   const [cargando, setCargando] = useState(true);
+  const [rangoFecha, setRangoFecha] = useState('mes');
+  const [fechasLibres, setFechasLibres] = useState({ inicio: '', fin: '' });
+
+  const isAdmin = user?.rol === 'Admin';
+  const isTecnico = user?.rol === 'Tecnico';
+  const isUsuario = user?.rol === 'Usuario';
+
+  const fetchData = async () => {
+    try {
+      let params = {};
+      const hoy = new Date();
+      if (rangoFecha === 'dia') params.fecha_inicio = new Date(hoy.setHours(0,0,0,0)).toISOString();
+      else if (rangoFecha === 'semana') params.fecha_inicio = new Date(hoy.setDate(hoy.getDate() - 7)).toISOString();
+      else if (rangoFecha === 'mes') params.fecha_inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+      else if (rangoFecha === 'libre' && fechasLibres.inicio && fechasLibres.fin) {
+        params.fecha_inicio = new Date(fechasLibres.inicio).toISOString();
+        params.fecha_fin = new Date(fechasLibres.fin).toISOString();
+      }
+
+      const res = await clienteAxios.get('/dashboard/stats', { params });
+      setData(res.data);
+    } catch (error) {
+      console.error("Error al cargar dashboard", error);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, [rangoFecha, fechasLibres]);
 
   useEffect(() => {
-    const obtenerEstadisticas = async () => {
-      try {
-        const res = await clienteAxios.get('/dashboard/stats');
-        setStats(res.data);
-      } catch (error) {
-        console.error("Error al obtener estadísticas del dashboard:", error);
-      } finally {
-        setCargando(false);
-      }
+    let socket;
+    const connectWS = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const wsUrl = `${protocol}://${window.location.hostname}:8000/api/v1/dashboard/ws/${user.id}`;
+      
+      console.log("Conectando WS Dashboard...", wsUrl);
+      socket = new WebSocket(wsUrl);
+      
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          console.log("Mensaje WS recibido:", msg);
+          if (msg.type === 'update_dashboard') {
+            console.log("Señal de actualización recibida, refrescando stats...");
+            fetchData();
+          }
+        } catch (e) { console.error("Error procesando mensaje WS", e); }
+      };
+
+      socket.onopen = () => console.log("WS Dashboard Conectado ✅");
+      socket.onerror = (err) => console.error("Error WS Dashboard ❌", err);
+      socket.onclose = () => {
+        console.log("WS Dashboard Cerrado, reintentando en 3s...");
+        setTimeout(connectWS, 3000);
+      };
     };
+    
+    connectWS();
+    return () => { if (socket) socket.close(); };
+  }, [user.id]); // 🔥 Depender de user.id para reconectar si cambia el usuario
 
-    obtenerEstadisticas();
-  }, []);
+  const stats = isAdmin ? data?.admin : isTecnico ? data?.tecnico : data?.usuario;
 
-  // ==========================================
-  // FUNCIONES DE BOTONES (Admin)
-  // ==========================================
-  const handleGenerarReporte = () => {
-    // Abre el diálogo de impresión del navegador para exportar a PDF
-    window.print();
-  };
-
-  const handleReasignar = (nombreTicket) => {
-    // Alerta temporal: Aquí abriremos un modal en el futuro
-    alert(`Abriendo panel de reasignación para:\n\n📋 ${nombreTicket}\n\n(Esta función se conectará al motor SLA pronto para elegir un nuevo técnico).`);
-  };
-
-  if (cargando || !stats) {
+  if (cargando) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  // ==========================================
-  // 1. VISTA DE ADMINISTRADOR (Torre de Control Total)
-  // ==========================================
-  if (user?.rol === 'Admin') {
-    const dataAdmin = stats.admin;
-
+  if (!data || !stats) {
     return (
-      <div className="animate-fadeIn space-y-8">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight uppercase">Torre de Control <span className="text-cyan-500">Global</span></h1>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Supervisión Total de Infraestructura y SLAs</p>
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center p-10 bg-white rounded-lg shadow-sm border border-slate-200">
+           <p className="text-slate-800 font-bold">Error de Sincronización</p>
+           <button onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded text-xs font-bold uppercase">Reintentar</button>
+        </div>
+      </div>
+    );
+  }
+
+  const formatCurrency = (val) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(val || 0);
+
+  return (
+    <div className="h-full flex flex-col p-6 overflow-y-auto custom-scrollbar-light bg-[#f8fafc]">
+      
+      {/* HEADER */}
+      <div className="flex-none flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+            {isAdmin ? 'Panel de Control Operativo' : isTecnico ? 'Mi Resumen Técnico' : 'Mi Portal de Servicio'}
+          </h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">
+            {isAdmin ? 'Resumen general y métricas de desempeño.' : isTecnico ? 'Seguimiento de tus tareas y rendimiento personal.' : 'Estado de tus solicitudes y equipos asignados.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="flex bg-white border border-slate-200 p-1 rounded-xl shadow-sm mr-2">
+            {[
+              { id: 'dia', label: 'D' },
+              { id: 'semana', label: 'W' },
+              { id: 'mes', label: 'M' }
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setRangoFecha(t.id)}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${rangoFecha === t.id ? 'bg-slate-800 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
-          {/* BOTÓN CONECTADO: Generar Reporte PDF */}
-          <button
-            onClick={handleGenerarReporte}
-            className="bg-cyan-600 hover:bg-cyan-500 text-white px-5 py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest transition shadow-lg shadow-cyan-900/20 flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            Generar Reporte PDF
+
+          <button onClick={() => setVista('tickets')} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow font-medium text-sm transition flex items-center gap-2 whitespace-nowrap">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            Nuevo Ticket
           </button>
         </div>
+      </div>
 
-        {/* KPIs Globales (Conectados al Backend) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-sm hover:border-slate-700 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Tickets Totales</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-3xl font-black text-white leading-none">{dataAdmin.ticketsTotales}</h3>
-              <p className="text-green-500 text-xs font-bold flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-                12%
-              </p>
-            </div>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-sm border-l-4 border-l-red-500 hover:border-slate-700 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Críticos fuera de SLA</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-3xl font-black text-white leading-none">{dataAdmin.criticosSLA}</h3>
-              <p className="text-red-500 text-[10px] font-bold">¡Acción Requerida!</p>
-            </div>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-sm hover:border-slate-700 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Técnicos Online</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-3xl font-black text-white leading-none">{dataAdmin.tecnicosOnline}<span className="text-slate-500 text-xl font-bold">/{dataAdmin.tecnicosTotal}</span></h3>
-            </div>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl shadow-sm hover:border-slate-700 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Disponibilidad TI</p>
-            <div className="flex items-end justify-between">
-              <h3 className="text-3xl font-black text-cyan-500 leading-none">99.8%</h3>
-            </div>
-          </div>
-        </div>
+      {/* KPI GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {isAdmin && (
+          <>
+            <KPICard label="Tickets Totales" value={stats.ticketsTotales} color="blue" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path></svg>} />
+            <KPICard label="En Riesgo SLA" value={stats.criticosSLA} color="orange" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>} />
+            <KPICard label="Técnicos Online" value={`${stats.tecnicosOnline}/${stats.tecnicosTotal}`} color="emerald" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>} />
+            <KPICard label="Valor Activos" value={formatCurrency(data.admin.valorActivos)} color="blue" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+          </>
+        )}
+        {isTecnico && (
+          <>
+            <KPICard label="Mis Tickets Activos" value={stats.activos} color="blue" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path></svg>} />
+            <KPICard label="Resueltos (Periodo)" value={stats.resueltos} color="emerald" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+            <KPICard label="Mi Rating CSAT" value={`${stats.csat} ★`} color="amber" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>} />
+            <KPICard label="SLA Global" value="98%" color="indigo" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>} />
+          </>
+        )}
+        {isUsuario && (
+          <>
+            <KPICard label="Mis Solicitudes" value={stats.solicitudes} color="blue" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"></path></svg>} />
+            <KPICard label="Mis Equipos" value={stats.equipos} color="indigo" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>} />
+            <KPICard label="Estatus Cuenta" value="Activa" color="emerald" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+            <KPICard label="Soporte VIP" value="Normal" color="slate" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-7.714 2.143L11 21l-2.286-6.857L1 12l7.714-2.143L11 3z"></path></svg>} />
+          </>
+        )}
+      </div>
 
-        {/* PANEL DE GESTIÓN SLA (Estructura Original) */}
-        <div className="bg-slate-900/50 border border-red-500/30 rounded-xl p-5 shadow-inner">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="flex h-3 w-3 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-            </span>
-            <h3 className="text-xs font-black text-red-500 uppercase tracking-widest">Reasignación de Emergencia (Riesgo SLA)</h3>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-slate-900 border border-slate-700 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:border-red-500/50 transition-colors">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-red-500/10 text-red-500 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">Vence: 14 min</span>
-                </div>
-                <h4 className="text-white font-bold text-sm">Falla en Servidor ERP - Planta 2</h4>
-                <p className="text-slate-400 text-xs mt-1">Asignado: <span className="text-slate-300 font-semibold">Roberto Torres (Ocupado)</span></p>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* LEFT COLUMN */}
+        <div className="lg:col-span-8 space-y-6">
+          
+          {/* ANALYTICS CHARTS */}
+          {!isUsuario && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5">
+              <SectionHeader label={isAdmin ? 'Tendencia Global de Tickets' : 'Mi Productividad'} color="blue" />
+              <div className="h-64 mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={stats.tendencia || data.admin.tendencia}>
+                    <defs>
+                      <linearGradient id="colorTk" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#94a3b8'}} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 700, fill: '#94a3b8'}} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="tickets" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorTk)" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-              {/* BOTÓN CONECTADO: Reasignar 1 */}
-              <button
-                onClick={() => handleReasignar('Falla en Servidor ERP - Planta 2')}
-                className="w-full sm:w-auto bg-slate-800 hover:bg-red-600 text-white border border-slate-700 hover:border-red-600 px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-colors"
-              >
-                Reasignar
-              </button>
             </div>
+          )}
 
-            <div className="bg-slate-900 border border-slate-700 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:border-orange-500/50 transition-colors">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-orange-500/10 text-orange-500 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">Vence: 32 min</span>
-                </div>
-                <h4 className="text-white font-bold text-sm">Problema Acceso VPN Directivos</h4>
-                <p className="text-slate-400 text-xs mt-1">Asignado: <span className="text-slate-300 font-semibold">Ana Gómez (Comiendo)</span></p>
+          {/* MIS EQUIPOS (SOLO USUARIO) */}
+          {isUsuario && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80">
+                <SectionHeader label="Mis Equipos Asignados" color="indigo" />
               </div>
-              {/* BOTÓN CONECTADO: Reasignar 2 */}
-              <button
-                onClick={() => handleReasignar('Problema Acceso VPN Directivos')}
-                className="w-full sm:w-auto bg-slate-800 hover:bg-orange-600 text-white border border-slate-700 hover:border-orange-600 px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-colors"
-              >
-                Reasignar
-              </button>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b">
+                    <tr>
+                      <th className="p-4">Equipo</th>
+                      <th className="p-4">Serie</th>
+                      <th className="p-4">Tipo</th>
+                      <th className="p-4">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {stats.equiposList?.map((e, i) => (
+                      <tr key={i} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-4 text-xs font-bold text-slate-700">{e.nombre}</td>
+                        <td className="p-4 text-xs text-slate-500">{e.serie}</td>
+                        <td className="p-4 text-xs text-slate-500">{e.tipo}</td>
+                        <td className="p-4">
+                          <span className="bg-emerald-50 text-emerald-600 text-[9px] font-bold px-2 py-0.5 rounded-full uppercase border border-emerald-100">{e.estatus}</span>
+                        </td>
+                      </tr>
+                    ))}
+                    {(!stats.equiposList || stats.equiposList.length === 0) && (
+                      <tr>
+                        <td colSpan="4" className="p-10 text-center text-slate-400 text-xs italic">No tienes equipos asignados.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Monitor de Técnicos (Estructura Original) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-800 bg-slate-800/20">
-            <h3 className="text-xs font-black text-white uppercase tracking-widest">Monitor de Staff en Vivo</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-900/50 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-800">
-                  <th className="px-6 py-3">Técnico</th>
-                  <th className="px-6 py-3">Estatus</th>
-                  <th className="px-6 py-3">Carga Actual</th>
-                  <th className="px-6 py-3 w-1/4">SLA Mensual</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm">
-                <tr className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                  <td className="px-6 py-4 font-bold text-white">Roberto Torres</td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center gap-1.5 bg-green-500/10 text-green-500 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Activo
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-slate-300 font-medium">3 Tickets</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="bg-green-500 h-full w-[98%]"></div>
+          {/* TICKETS RIESGO / VENCIMIENTOS */}
+          {!isUsuario && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50/80">
+                <SectionHeader label={isAdmin ? 'Tickets Críticos SLA (Global)' : 'Mis Próximos Vencimientos'} color="orange" />
+                <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">SLA Monitor</span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {stats.ticketsRiesgo?.map((t) => (
+                  <div key={t.id} className="p-4 hover:bg-slate-50/80 transition-all flex items-center justify-between group">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className={`w-10 h-10 rounded border flex items-center justify-center font-bold text-xs shrink-0 ${t.color === 'red' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
+                        #{t.id}
                       </div>
-                      <span className="text-xs font-bold text-slate-400 w-8 text-right">98%</span>
-                    </div>
-                  </td>
-                </tr>
-                <tr className="border-b border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                  <td className="px-6 py-4 font-bold text-white">Ana Gómez</td>
-                  <td className="px-6 py-4">
-                    <span className="inline-flex items-center gap-1.5 bg-orange-500/10 text-orange-500 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span> Comiendo
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-slate-300 font-medium">8 Tickets</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div className="bg-orange-500 h-full w-[85%]"></div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800 group-hover:text-blue-600 transition-colors truncate">{t.titulo}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {isAdmin && (
+                            <span className="text-[11px] text-slate-400 font-medium">Asignado: <span className="text-slate-600 font-bold">{t.asignado}</span></span>
+                          )}
+                          {!isAdmin && (
+                            <span className="text-[11px] text-slate-400 font-medium uppercase font-bold tracking-tight">Vence Pronto</span>
+                          )}
+                        </div>
                       </div>
-                      <span className="text-xs font-bold text-slate-400 w-8 text-right">85%</span>
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                    <div className="text-right shrink-0 ml-4">
+                      <p className={`text-[11px] font-bold ${t.color === 'red' ? 'text-red-600' : 'text-orange-600'}`}>Vence en {t.venceEn}</p>
+                      <button onClick={() => setVista('tickets')} className="mt-1 text-[10px] text-blue-600 font-bold hover:underline">Ver Ticket</button>
+                    </div>
+                  </div>
+                ))}
+                {(!stats.ticketsRiesgo || stats.ticketsRiesgo.length === 0) && (
+                  <div className="p-10 text-center text-slate-400 text-sm font-medium italic">Todo bajo control.</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MONITOR DE AGENTES (SOLO ADMIN) */}
+          {isAdmin && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50/80">
+                  <SectionHeader label="Estado de Agentes" color="blue" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-slate-200">
+                  {stats.tecnicos?.map(tec => (
+                    <div key={tec.id} className="bg-white p-4 flex items-center gap-4 hover:bg-slate-50 transition-colors">
+                        <div className="relative">
+                          <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
+                              {tec.nombre.substring(0,2).toUpperCase()}
+                          </div>
+                          <span className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${tec.color === 'emerald' ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-slate-800 truncate">{tec.nombre}</p>
+                          <div className="flex items-center gap-1.5">
+                             <span className={`w-2 h-2 rounded-full ${
+                                tec.estatus === 'Activo' ? 'bg-emerald-500 shadow-[0_0_5px_#10b981]' : 
+                                (tec.estatus === 'Ocupado' || tec.estatus === 'Vacaciones') ? 'bg-red-600 shadow-[0_0_5px_#ef4444]' : 
+                                'bg-amber-500 shadow-[0_0_5px_#f59e0b]'
+                             }`}></span>
+                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{tec.estatus}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-bold text-slate-700">{tec.carga}</p>
+                          <p className="text-[10px] text-emerald-600 font-bold">Rating: {tec.sla}</p>
+                        </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN */}
+        <div className="lg:col-span-4 space-y-6">
+           
+           {/* MANTENIMIENTOS (ADMIN) */}
+           {isAdmin && stats.mantenimientos?.length > 0 && (
+            <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-200 bg-indigo-50/30">
+                <SectionHeader label="Próximos Mantenimientos" color="indigo" />
+              </div>
+              <div className="divide-y divide-slate-100">
+                {stats.mantenimientos.slice(0, 5).map((m, i) => (
+                  <div key={i} className="p-4 hover:bg-slate-50 transition-all flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">{m.nombre}</p>
+                      <p className="text-[10px] font-bold text-red-600 uppercase mt-1">Atraso: {m.atraso}d</p>
+                    </div>
+                    <button onClick={() => setVista('inventario')} className="text-[10px] font-bold text-indigo-600 hover:underline">Gestionar</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+           )}
+
+           {/* LIVE ACTIVITY */}
+           <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-5">
+              <SectionHeader label={isAdmin ? 'Actividad Global' : 'Mi Actividad'} color="blue" />
+              <div className="space-y-6 relative mt-6">
+                 <div className="absolute left-[17px] top-2 bottom-2 w-0.5 bg-slate-100"></div>
+                 {stats.actividad?.map((act, i) => (
+                    <div key={i} className="flex gap-4 relative">
+                       <div className="w-9 h-9 rounded-full bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 z-10 shadow-sm text-[10px] font-bold text-blue-600">
+                          {act.usuario.substring(0,2).toUpperCase()}
+                       </div>
+                       <div className="min-w-0">
+                          <p className="text-[12px] font-bold text-slate-800 leading-tight">
+                             <span className="text-blue-600">{act.usuario}</span> {act.accion.toLowerCase()}
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mt-1 tracking-tight">
+                             {act.tabla} • {new Date(act.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                       </div>
+                    </div>
+                 ))}
+                 {(!stats.actividad || stats.actividad.length === 0) && (
+                    <p className="text-center text-slate-400 text-xs italic py-4">Sin actividad reciente.</p>
+                 )}
+              </div>
+           </div>
         </div>
       </div>
-    );
-  }
 
-  // ==========================================
-  // 2. VISTA DE TÉCNICO (Panel de Operaciones)
-  // ==========================================
-  if (user?.rol === 'Tecnico') {
-    const dataTecnico = stats.tecnico;
-    return (
-      <div className="animate-fadeIn space-y-8">
-        <div className="border-b border-slate-800 pb-4">
-          <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight uppercase">Estación de <span className="text-cyan-500">Trabajo</span></h1>
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">Gestión de tickets asignados y rendimiento personal</p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl border-t-4 border-t-cyan-500 shadow-sm hover:bg-slate-800/50 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Mis Tickets Activos</p>
-            <h3 className="text-4xl font-black text-white">{dataTecnico.activos}</h3>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl border-t-4 border-t-green-500 shadow-sm hover:bg-slate-800/50 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Resueltos este Mes</p>
-            <h3 className="text-4xl font-black text-white">{dataTecnico.resueltos}</h3>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl border-t-4 border-t-orange-500 shadow-sm hover:bg-slate-800/50 transition-colors">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Mi SLA Promedio</p>
-            <h3 className="text-4xl font-black text-white">{dataTecnico.sla}</h3>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==========================================
-  // 3. VISTA DE USUARIO NORMAL (Portal de Soporte)
-  // ==========================================
-  const dataUsuario = stats.usuario;
-  return (
-    <div className="animate-fadeIn space-y-8">
-      <div className="bg-slate-900 border border-slate-800 p-8 md:p-10 rounded-2xl shadow-sm relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
-        <div className="relative z-10 flex flex-col md:flex-row gap-8 items-start md:items-center justify-between">
-          <div className="max-w-2xl">
-            <h1 className="text-3xl md:text-4xl font-black text-white mb-3 tracking-tight">¡Hola, {primerNombre}! 👋</h1>
-            <p className="text-slate-400 text-base md:text-lg leading-relaxed">Bienvenido a tu portal de servicios TI. Estamos aquí para ayudarte a mantener tus herramientas funcionando al 100%.</p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
-            <button onClick={() => setVista('tickets')} className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-cyan-900/20">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-              Reportar Problema
-            </button>
-            <button onClick={() => setVista('conocimiento')} className="bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 px-6 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors">
-              <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-              Ver Tutoriales
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm flex flex-col justify-between hover:bg-slate-800/50 transition-colors">
-          <div className="flex justify-between items-start mb-4">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mis Solicitudes</p>
-            <span className="p-1.5 bg-blue-500/10 text-blue-500 rounded-md"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></span>
-          </div>
-          <h3 className="text-3xl font-black text-white">{dataUsuario.solicitudes} <span className="text-sm font-medium text-slate-500 ml-1">Abiertas</span></h3>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm flex flex-col justify-between hover:bg-slate-800/50 transition-colors">
-          <div className="flex justify-between items-start mb-4">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mis Equipos</p>
-            <span className="p-1.5 bg-cyan-500/10 text-cyan-500 rounded-md"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></span>
-          </div>
-          <h3 className="text-3xl font-black text-white">{dataUsuario.equipos} <span className="text-sm font-medium text-slate-500 ml-1">Asignados</span></h3>
-        </div>
-        <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl shadow-sm border-l-4 border-l-green-500 flex flex-col justify-between hover:bg-slate-800/50 transition-colors">
-          <div className="flex justify-between items-start mb-4">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estatus TI</p>
-            <span className="p-1.5 bg-green-500/10 text-green-500 rounded-md"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg></span>
-          </div>
-          <h3 className="text-xl font-black text-green-500 uppercase tracking-tight">{dataUsuario.estatus}</h3>
-        </div>
-      </div>
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        .custom-scrollbar-light::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scrollbar-light::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar-light::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        .custom-scrollbar-light::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
+      `}} />
     </div>
   );
 };
+
+const KPICard = ({ label, value, icon, color }) => (
+  <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-all group">
+    <div className="flex justify-between items-center mb-4">
+      <div className={`p-2 rounded-lg bg-${color}-50 text-${color}-600 border border-${color}-100`}>
+        {icon}
+      </div>
+      <span className={`text-[9px] font-semibold uppercase px-2 py-0.5 rounded-full bg-${color}-50/50 text-${color}-700 border border-${color}-200`}>En Vivo</span>
+    </div>
+    <p className="text-slate-500 text-[11px] font-bold uppercase tracking-widest">{label}</p>
+    <p className="text-2xl font-bold text-slate-800 mt-1">{value}</p>
+  </div>
+);
+
+const SectionHeader = ({ label, color }) => (
+    <p className={`text-[10px] font-bold text-${color}-600 uppercase tracking-[0.3em] flex items-center gap-2`}>
+        <span className={`w-2 h-2 rounded-full bg-${color}-500`}></span> {label}
+    </p>
+);
 
 export default Dashboard;

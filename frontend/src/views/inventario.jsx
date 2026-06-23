@@ -1,707 +1,1533 @@
 // frontend/src/views/inventario.jsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import Pagination from '../components/Pagination';
+import clienteAxios from '../api/axios';
+
+// --- COMPONENTES AUXILIARES (Definidos arriba para evitar ReferenceErrors) ---
+const formatoMoneda = (m) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(m || 0);
+
+const DetailItem = ({ label, value }) => (
+    <div className="flex justify-between items-center">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{label}:</span>
+        <span className="text-xs font-black text-slate-700">{value || '---'}</span>
+    </div>
+);
+
+const SpecBlock = ({ icon, label, value }) => (
+    <div className="flex items-center gap-4 p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 transition-all">
+        <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center"><i className={icon}></i></div>
+        <div>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+            <p className="text-sm font-black text-slate-700">{value || '---'}</p>
+        </div>
+    </div>
+);
+
+const SectionHeader = ({ label, color }) => (
+    <p className={`text-[10px] font-black text-${color}-600 uppercase tracking-[0.3em] flex items-center gap-2`}>
+        <span className={`w-2 h-2 rounded-full bg-${color}-500`}></span> {label}
+    </p>
+);
+
+const FormInput = ({ label, value, onChange, type = "text", required = false }) => (
+    <div className="space-y-2">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{label} {required && '*'}</label>
+        <input type={type} value={value || ''} onChange={e => onChange(e.target.value)} required={required} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-bold text-slate-700 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner" />
+    </div>
+);
 
 const Inventario = ({ user, token }) => {
-  // --- ESTADOS DINÁMICOS: Catálogos y Configuraciones ---
-  const [catalogoProveedores, setCatalogoProveedores] = useState(['PC Link S.A. de C.V.', 'Telcel Corporativo', 'Office Depot', 'Amazon Business', 'Dell Directo']);
-  const [catalogoMarcas, setCatalogoMarcas] = useState(['Dell', 'HP', 'Lenovo', 'Apple', 'Samsung', 'Cisco']);
-  const [catalogoSoftware, setCatalogoSoftware] = useState(['Office 365 E3', 'Windows 11 Pro', 'AutoCAD 2024', 'Adobe Creative Cloud', 'Antivirus ESET']);
+  // --- PAGINACIÓN ---
+  const [paginaActual, setPaginaActual] = useState(1);
+  const [itemsPorPagina, setItemsPorPagina] = useState(10);
 
-  const [catalogoUsuarios] = useState([
-    { nombre: 'María López', departamento: 'Contabilidad' },
-    { nombre: 'Juan Pérez', departamento: 'Ventas' },
-    { nombre: 'Ana Gómez', departamento: 'Recursos Humanos' },
-    { nombre: 'Carlos Ruiz', departamento: 'Sistemas' },
-    { nombre: 'Alejandro Rubio', departamento: 'Dirección' },
-    { nombre: 'Laura Salas', departamento: 'Operaciones' }
+  // --- CATÁLOGOS ---
+  const [catalogoCategorias] = useState([
+    'Equipo de Cómputo', 'Celular', 'Monitor', 'Impresora', 'Teclado', 'Mouse', 'Servidor', 'Tablet', 'Red', 'Periférico'
   ]);
+  const [catalogoUsuarios, setCatalogoUsuarios] = useState([]);
+  const [catalogoLicencias, setCatalogoLicencias] = useState([]);
+  const [catalogoMarcas, setCatalogoMarcas] = useState([]);
+  const [catalogoProveedores, setCatalogoProveedores] = useState([]);
+  const [catalogoModelosParte, setCatalogoModelosParte] = useState([]);
 
-  const [configEmpresa, setConfigEmpresa] = useState({
-    nombre: 'Rubio Films',
-    logoUrl: 'https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?ixlib=rb-4.0.3&auto=format&fit=crop&w=200&q=80'
-  });
-
-  const [docStyle, setDocStyle] = useState({ fontSize: 14, textAlign: 'justify' });
-
-  // PLANTILLA ACTUALIZADA: Usamos el tag {{ESPACIO_FIRMA}} para inyectar la firma o la línea
-  const [plantillaResguardo, setPlantillaResguardo] = useState(
-    "CARTA DE RESGUARDO DE EQUIPO TÉCNICO\n\nPor medio de la presente, yo, {{ASIGNADO_A}}, del departamento de {{DEPARTAMENTO}}, acepto de conformidad el resguardo de los siguientes equipos propiedad de la empresa:\n\n{{TABLA_ACTIVOS}}\n\nCONDICIONES DE USO:\n1. Me comprometo a cuidar los equipos y utilizarlos exclusivamente para fines laborales correspondientes a mi puesto.\n2. En caso de robo, me comprometo a levantar el acta correspondiente ante el Ministerio Público en un plazo no mayor a 24 horas.\n3. En caso de daño por negligencia, descuido o pérdida injustificada, autorizo a la empresa a realizar el descuento correspondiente vía nómina por el valor de reparación o reposición.\n\n{{SALTO_DE_PAGINA}}\n\n4. Al momento de mi baja en la empresa o cuando el área de Sistemas lo solicite, me comprometo a devolver estos equipos en las mismas condiciones funcionales en las que los recibí (salvo el desgaste por uso normal).\n\nFecha de emisión: {{FECHA}}\n\n\n{{ESPACIO_FIRMA}}\nFirma de Conformidad\n{{ASIGNADO_A}}"
-  );
-
-  // --- MOCK DATA: Activos ---
-  const [activos, setActivos] = useState([
-    {
-      id: 1, serie: 'LT-DELL-042', modelo: 'Latitude 5420', categoria: 'Computadoras', marca: 'Dell',
-      asignado_a: 'María López', departamento: 'Contabilidad', estatus: 'Activo', prox_mantenimiento: '2026-06-15', proveedor: 'Dell Directo',
-      fecha_compra: '2023-04-20', anios_garantia: 3, costo: 18500,
-      software_instalado: ['Windows 11 Pro', 'Office 365 E3', 'Antivirus ESET'],
-      historial: [
-        { id: 101, fecha: '20 Abr 2023, 10:00 AM', accion: 'Compra y Alta', usuario_involucrado: 'Admin Sistema', notas: 'Compra directa a Dell.' },
-        { id: 102, fecha: '25 Abr 2023, 12:30 PM', accion: 'Asignación Inicial', usuario_involucrado: 'María López', notas: 'Entregado con cargador original.' }
-      ]
-    },
-    {
-      id: 2, serie: 'CEL-IPH-012', modelo: 'iPhone 13', categoria: 'Celulares', marca: 'Apple',
-      asignado_a: 'Juan Pérez', departamento: 'Ventas', estatus: 'Activo', prox_mantenimiento: null, proveedor: 'Telcel Corporativo',
-      fecha_compra: '2024-02-15', anios_garantia: 1, costo: 15000,
-      software_instalado: [],
-      historial: [
-        { id: 201, fecha: '10 Ene 2024, 09:00 AM', accion: 'Compra y Alta', usuario_involucrado: 'Admin Sistema', notas: 'Renovación de plan.' }
-      ]
-    },
-    {
-      id: 3, serie: 'MN-SAMSUNG-99', modelo: 'Monitor Curvo 24"', categoria: 'Perifericos', marca: 'Samsung',
-      asignado_a: 'Sin Asignar', departamento: 'Sistemas', estatus: 'Disponible', prox_mantenimiento: null, proveedor: 'Amazon Business',
-      fecha_compra: '2026-01-05', anios_garantia: 1, costo: 3500,
-      software_instalado: [],
-      historial: [
-        { id: 301, fecha: '05 Ene 2026, 11:00 AM', accion: 'Compra y Alta', usuario_involucrado: 'Admin Sistema', notas: 'Ingreso a almacén.' }
-      ]
-    }
-  ]);
-
-  // Estados de la vista principal
+  // --- ESTADO PRINCIPAL ---
+  const [activos, setActivos] = useState([]);
+  const [cargando, setCargando] = useState(true);
   const [activoSeleccionado, setActivoSeleccionado] = useState(null);
   const [filtroCategoria, setFiltroCategoria] = useState('Todas');
+  const [busqueda, setBusqueda] = useState('');
   const [pestañaActiva, setPestañaActiva] = useState('detalles');
 
-  // Estados para Modales
+  const [mostrarModalBitacora, setMostrarModalBitacora] = useState(false);
+  const [formBitacora, setFormBitacora] = useState({ tipo: 'Preventivo', descripcion: '', costo: 0, fecha: new Date().toISOString().split('T')[0] });
+
+  // NUEVOS MODALES BAJA
+  const [mostrarModalBaja, setMostrarModalBaja] = useState(false);
+  const [formBaja, setFormBaja] = useState({ motivo: 'Robo', notas: '', archivos: [] });
+  const [idsSeleccionados, setIdsSeleccionados] = useState([]);
+  const [mostrarModalBajaDefinitiva, setMostrarModalBajaDefinitiva] = useState(false);
+
+  // Modales
   const [mostrarModalAlta, setMostrarModalAlta] = useState(false);
   const [mostrarModalEditar, setMostrarModalEditar] = useState(false);
   const [mostrarModalReasignar, setMostrarModalReasignar] = useState(false);
   const [mostrarModalCatalogos, setMostrarModalCatalogos] = useState(false);
-  const [activoParaResguardo, setActivoParaResguardo] = useState(null);
-
-  // ESTADOS DE FIRMA DIGITAL
+  const [mostrarModalResguardo, setMostrarModalResguardo] = useState(false);
   const [mostrarModalFirma, setMostrarModalFirma] = useState(false);
-  const [firmaDigital, setFirmaDigital] = useState(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+
+  // --- FIRMA DIGITAL ---
   const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [firmaDigital, setFirmaDigital] = useState(null);
 
-  const [editandoEstatus, setEditandoEstatus] = useState(false);
-  const [formEstatus, setFormEstatus] = useState({ nuevo_estatus: '', notas: '' });
-
-  // Formularios
-  const [formNuevoActivo, setFormNuevoActivo] = useState({ serie: '', modelo: '', marca: '', categoria: 'Computadoras', proveedor: '', fecha_compra: '', anios_garantia: 1, costo: '', prox_mantenimiento: '' });
+  // --- FORMULARIOS ---
+  const [formNuevoActivo, setFormNuevoActivo] = useState({ 
+    codigo: '', numero_parte: '', modelo_parte_id: null, nombre: '', modelo: '', marca_id: '', proveedor_id: '', tipo: 'Equipo de Cómputo', 
+    costo: '', anios_garantia: 1, imei: '', chip: '', serie: '', ram: '', cpu: '',
+    pulgadas: '', almacenamiento: '', formato: '', rma: '', factura_numero: '', fecha_compra: new Date().toISOString().split('T')[0],
+    fecha_ultimo_mantenimiento: '', meses_mantenimiento: 6
+  });
   const [formEditarActivo, setFormEditarActivo] = useState(null);
-  const [formReasignar, setFormReasignar] = useState({ nuevo_asignado: '', nuevo_departamento: '', notas: '' });
-  const [nuevoSoftwareAsignar, setNuevoSoftwareAsignar] = useState("");
+  const [formReasignar, setFormReasignar] = useState({ nuevo_asignado_id: '', notas: '', licencias_ids: [] });
+  const [formNuevoCatalogo, setFormNuevoCatalogo] = useState({ tipo: 'marca', nombre: '', descripcion: '', rfc: '' });
 
-  const [pestañaCatalogo, setPestañaCatalogo] = useState('empresa');
-  const [nuevoItemCatalogo, setNuevoItemCatalogo] = useState("");
+  const isAdmin = user?.rol === 'Admin';
+  const isTecnico = user?.rol === 'Tecnico';
+  const puedeEditar = isAdmin || isTecnico;
 
-  // Helpers
-  const formatoMoneda = (monto) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto || 0);
+  // --- TECLA ESCAPE PARA CERRAR ---
+  useEffect(() => {
+    const handleEsc = (event) => {
+      if (event.key === 'Escape') {
+        setActivoSeleccionado(null);
+        setMostrarModalAlta(false);
+        setMostrarModalEditar(false);
+        setMostrarModalReasignar(false);
+        setMostrarModalCatalogos(false);
+        setMostrarModalResguardo(false);
+        setMostrarModalFirma(false);
+        setMostrarModalBitacora(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
 
-  const getEstatusBadge = (estatus) => {
-    const styles = { 'Activo': 'bg-green-500/10 text-green-400 border-green-500/20', 'Disponible': 'bg-blue-500/10 text-blue-400 border-blue-500/20', 'En Reparacion': 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20', 'Dado de Baja': 'bg-red-500/10 text-red-400 border-red-500/20', 'Obsoleto': 'bg-purple-500/10 text-purple-400 border-purple-500/20' };
-    return styles[estatus] || 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+  // --- CARGA DE DATOS ---
+  const cargarCatalogos = async () => {
+    try {
+      const [resUsers, resLics, resMarcas, resProvs, resModelos] = await Promise.all([
+        clienteAxios.get('/usuarios/'),
+        clienteAxios.get('/licencias/'),
+        clienteAxios.get('/catalogos/marcas'),
+        clienteAxios.get('/catalogos/proveedores'),
+        clienteAxios.get('/catalogos/modelos-parte')
+      ]);
+      setCatalogoUsuarios(resUsers.data);
+      setCatalogoLicencias(resLics.data);
+      setCatalogoMarcas(resMarcas.data);
+      setCatalogoProveedores(resProvs.data);
+      setCatalogoModelosParte(resModelos.data);
+    } catch (err) { console.error("Error catálogos", err); }
   };
 
-  const getCategoriaIcon = (categoria) => {
-    switch (categoria) {
-      case 'Computadoras': return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>;
-      case 'Celulares': return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>;
-      default: return <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2zm10 0h2a2 2 0 002-2V6a2 2 0 00-2-2h-2a2 2 0 00-2 2v2a2 2 0 002 2zM6 20h2a2 2 0 002-2v-2a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z"></path></svg>;
+  const handleBusquedaParte = async (numParte, setForm, currentForm) => {
+    if (!numParte) return;
+    try {
+        const res = await clienteAxios.get(`/catalogos/modelos-parte/search/${numParte}`);
+        const data = res.data;
+        setForm({
+            ...currentForm,
+            numero_parte: data.numero_parte,
+            modelo_parte_id: data.id,
+            nombre: data.nombre,
+            modelo: data.nombre,
+            marca_id: data.marca_id || '',
+            tipo: data.tipo || currentForm.tipo,
+            ram: data.ram || '',
+            cpu: data.cpu || '',
+            almacenamiento: data.almacenamiento || '',
+            pulgadas: data.pulgadas || '',
+            rma: data.rma || ''
+        });
+    } catch (err) {
+        console.log("Número de parte no encontrado en catálogo");
     }
   };
 
-  const calcularEstadoGarantia = (fechaCompra, aniosGarantia) => {
-    if (!fechaCompra || !aniosGarantia) return { estado: 'Sin Dato', dias: null };
-    const compra = new Date(fechaCompra);
-    const vencimiento = new Date(compra.setFullYear(compra.getFullYear() + parseInt(aniosGarantia)));
-    const hoy = new Date();
-    const diferenciaMilisegundos = vencimiento - hoy;
-    const diasRestantes = Math.ceil(diferenciaMilisegundos / (1000 * 60 * 60 * 24));
-    if (diasRestantes < 0) return { estado: 'Expirada', dias: diasRestantes, fechaVence: vencimiento.toLocaleDateString() };
-    if (diasRestantes <= 30) return { estado: 'Por Expirar', dias: diasRestantes, fechaVence: vencimiento.toLocaleDateString() };
-    return { estado: 'Vigente', dias: diasRestantes, fechaVence: vencimiento.toLocaleDateString() };
+  const fetchActivos = async (idParaActualizar = null) => {
+    setCargando(true);
+    try {
+      const response = await clienteAxios.get('/activos/');
+      const activosMapeados = response.data.map(dbActivo => {
+        // ✅ HUMANIZACIÓN: Usar el objeto 'usuario' que viene del backend
+        return {
+          ...dbActivo,
+          asignado_a: dbActivo.usuario ? dbActivo.usuario.nombre_completo : 'Sin Asignar',
+          departamento: dbActivo.usuario ? dbActivo.usuario.departamento : 'Sistemas',
+          categoria: dbActivo.tipo,
+          marca_nombre: dbActivo.marca?.nombre || dbActivo.marca_texto || 'N/A',
+          proveedor_nombre: dbActivo.proveedor?.nombre || 'N/A'
+        };
+      });
+      setActivos(activosMapeados);
+
+      // Si se proporcionó un ID, actualizar el activo seleccionado con la nueva data
+      if (idParaActualizar) {
+        const actualizado = activosMapeados.find(a => a.id === idParaActualizar);
+        if (actualizado) setActivoSeleccionado(actualizado);
+      }
+    } catch (error) { console.error(error); }
+    finally { setCargando(false); }
   };
 
-  const activosFiltrados = filtroCategoria === 'Todas' ? activos : activos.filter(a => a.categoria === filtroCategoria);
-  const formatFecha = () => new Date().toLocaleString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-  // --- LÓGICA DE FIRMA DIGITAL (CANVAS) ---
-  const getMousePos = (canvas, e) => {
-    const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
+  const handleRegistrarBitacora = async (e) => {
+    e.preventDefault();
+    try {
+        await clienteAxios.post(`/activos/${activoSeleccionado.id}/mantenimientos`, formBitacora);
+        alert("¡Mantenimiento registrado en bitácora!");
+        setMostrarModalBitacora(false);
+        setFormBitacora({ tipo: 'Preventivo', descripcion: '', costo: 0, fecha: new Date().toISOString().split('T')[0] });
+        fetchActivos(activoSeleccionado.id); // 🔥 RECARGA Y MANTÉN ABIERTO
+    } catch (err) { alert("Error al registrar bitácora"); }
   };
 
-  const startDrawing = (e) => {
-    setIsDrawing(true);
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const pos = getMousePos(canvas, e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.strokeStyle = "#000000"; // Tinta negra
+  useEffect(() => {
+    cargarCatalogos();
+  }, []);
+
+  useEffect(() => {
+    if (catalogoUsuarios.length > 0) fetchActivos();
+  }, [catalogoUsuarios]);
+
+  // --- ACCIONES API ---
+  const handleAltaActivo = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        ...formNuevoActivo,
+        marca_id: formNuevoActivo.marca_id ? parseInt(formNuevoActivo.marca_id) : null,
+        proveedor_id: formNuevoActivo.proveedor_id ? parseInt(formNuevoActivo.proveedor_id) : null,
+        costo: formNuevoActivo.costo ? parseFloat(formNuevoActivo.costo) : 0,
+        fecha_compra: formNuevoActivo.fecha_compra ? new Date(formNuevoActivo.fecha_compra).toISOString() : null,
+        fecha_ultimo_mantenimiento: formNuevoActivo.fecha_ultimo_mantenimiento ? new Date(formNuevoActivo.fecha_ultimo_mantenimiento).toISOString() : null
+      };
+      await clienteAxios.post('/activos/', payload);
+      alert("¡Activo registrado y mantenimiento programado!");
+      fetchActivos();
+      setMostrarModalAlta(false);
+      setFormNuevoActivo({ 
+        codigo: '', nombre: '', modelo: '', marca_id: '', proveedor_id: '', tipo: 'Equipo de Cómputo', 
+        costo: '', anios_garantia: 1, imei: '', chip: '', serie: '', ram: '', cpu: '',
+        pulgadas: '', almacenamiento: '', factura_numero: '', fecha_compra: new Date().toISOString().split('T')[0],
+        fecha_ultimo_mantenimiento: '', meses_mantenimiento: 6
+      });
+    } catch (error) { alert("Error al crear activo."); }
   };
 
-  const draw = (e) => {
-    if (!isDrawing) return;
-    e.preventDefault(); // Evita scroll en móviles al firmar
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const pos = getMousePos(canvas, e);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.stroke();
+  const handleGuardarEdicion = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        ...formEditarActivo,
+        marca_id: formEditarActivo.marca_id ? parseInt(formEditarActivo.marca_id) : null,
+        proveedor_id: formEditarActivo.proveedor_id ? parseInt(formEditarActivo.proveedor_id) : null,
+        costo: formEditarActivo.costo ? parseFloat(formEditarActivo.costo) : 0,
+        fecha_compra: formEditarActivo.fecha_compra ? new Date(formEditarActivo.fecha_compra).toISOString() : null,
+        fecha_ultimo_mantenimiento: formEditarActivo.fecha_ultimo_mantenimiento ? new Date(formEditarActivo.fecha_ultimo_mantenimiento).toISOString() : null
+      };
+      await clienteAxios.put(`/activos/${formEditarActivo.id}`, payload);
+      fetchActivos();
+      setMostrarModalEditar(false);
+      setActivoSeleccionado(null);
+      alert("Cambios guardados.");
+    } catch (error) { alert("Error al actualizar."); }
   };
 
+  const handleAbrirEditar = (a) => {
+    // 🔥 FIX: Formatear fechas para que el input type="date" las reconozca (YYYY-MM-DD)
+    const formataFecha = (d) => d ? d.split('T')[0] : '';
+    
+    setFormEditarActivo({
+        ...a,
+        fecha_compra: formataFecha(a.fecha_compra),
+        fecha_ultimo_mantenimiento: formataFecha(a.fecha_ultimo_mantenimiento),
+        notas: "" // Reset notas for new edit
+    });
+    setMostrarModalEditar(true);
+  };
+
+  const handleRegistrarMantenimientoRapido = async (activo) => {
+    if(!window.confirm("¿Confirmas que el mantenimiento se realizó hoy?")) return;
+    try {
+        await clienteAxios.put(`/activos/${activo.id}`, {
+            fecha_ultimo_mantenimiento: new Date().toISOString(),
+            notas: "Mantenimiento preventivo rápido registrado desde la lista."
+        });
+        fetchActivos(activo.id); // 🔥 RECARGA Y MANTÉN ABIERTO
+        alert("Mantenimiento registrado. Se recalculó la próxima fecha.");
+    } catch (error) { alert("Error al registrar."); }
+  };
+
+  const handleReasignar = async (e) => {
+    e.preventDefault();
+    try {
+      await clienteAxios.put(`/activos/${activoSeleccionado.id}`, {
+        usuario_id: parseInt(formReasignar.nuevo_asignado_id),
+        estatus: 'Asignado',
+        licencias_ids: formReasignar.licencias_ids,
+        notas: formReasignar.notas
+      });
+      fetchActivos();
+      setMostrarModalReasignar(false);
+      setActivoSeleccionado(null);
+      alert("Equipo reasignado correctamente.");
+    } catch (error) { alert("Error al reasignar."); }
+  };
+
+  const handleLiberarAStock = async (activo) => {
+    if(!window.confirm(`¿Seguro que quieres liberar el activo ${activo.codigo} a stock? Esto desvinculará todas las licencias actuales.`)) return;
+    try {
+        await clienteAxios.put(`/activos/${activo.id}`, {
+            estatus: 'Disponible',
+            usuario_id: null,
+            notas: "Liberación manual a stock (disponible)."
+        });
+        fetchActivos();
+        setActivoSeleccionado(null);
+        alert("Equipo liberado a stock correctamente.");
+    } catch (error) { 
+        console.error(error);
+        alert("Error al liberar."); 
+    }
+  };
+
+  const handleCrearCatalogo = async (e) => {
+    e.preventDefault();
+    const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : 'proveedores';
+    try {
+      await clienteAxios.post(`/catalogos/${url}`, {
+        nombre: formNuevoCatalogo.nombre,
+        descripcion: formNuevoCatalogo.descripcion,
+        rfc: formNuevoCatalogo.rfc
+      });
+      alert("Catálogo actualizado");
+      cargarCatalogos();
+      setFormNuevoCatalogo({ ...formNuevoCatalogo, nombre: '', descripcion: '', rfc: '' });
+    } catch (err) { alert("Error al crear catálogo"); }
+  };
+
+  const handleSoftDelete = async (activo) => {
+    setActivoSeleccionado(activo);
+    setFormBaja({ motivo: 'Robo', notas: '', archivos: [] });
+    setMostrarModalBaja(true);
+  };
+
+  const handleBaja = async (e) => {
+    e.preventDefault();
+    if ((formBaja.motivo === 'Robo' || formBaja.motivo === 'Venta') && formBaja.archivos.length === 0) {
+        alert(`Para baja por ${formBaja.motivo.toLowerCase()} es obligatorio subir el comprobante (PDF).`);
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('motivo', formBaja.motivo);
+    formData.append('notas', formBaja.notas);
+    formBaja.archivos.forEach(file => {
+        formData.append('files', file);
+    });
+
+    try {
+        await clienteAxios.post(`/activos/${activoSeleccionado.id}/baja`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        alert(`Activo dado de baja por ${formBaja.motivo.toLowerCase()}.`);
+        setMostrarModalBaja(false);
+        setActivoSeleccionado(null);
+        fetchActivos();
+    } catch (err) {
+        alert(err.response?.data?.detail || "Error al procesar la baja.");
+    }
+  };
+
+  const toggleSeleccion = (id) => {
+    setIdsSeleccionados(prev => 
+        prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBajaDefinitiva = async () => {
+    if (idsSeleccionados.length === 0) return;
+    if (!window.confirm(`¿Estás seguro de aplicar BAJA DEFINITIVA a los ${idsSeleccionados.length} activos seleccionados? Esta acción es irreversible.`)) return;
+    
+    try {
+        await clienteAxios.post('/activos/baja-definitiva-lote', idsSeleccionados);
+        alert("Baja definitiva aplicada correctamente.");
+        setIdsSeleccionados([]);
+        setMostrarModalBajaDefinitiva(false);
+        fetchActivos();
+    } catch (err) {
+        alert("Error al aplicar baja definitiva.");
+    }
+  };
+
+  const handleExportarExcel = async () => {
+    try {
+        const response = await clienteAxios.get('/activos/export/excel', { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `inventario_gnn_${new Date().toISOString().split('T')[0]}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    } catch (err) { alert("Error al exportar Excel"); }
+  };
+
+  const handleImportarExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await clienteAxios.post('/activos/import/excel', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        if (res.data.errores.length > 0) {
+            alert(`Importación completada con ${res.data.importados} activos. Errores: \n${res.data.errores.join('\n')}`);
+        } else {
+            alert(`¡Éxito! Se importaron ${res.data.importados} activos.`);
+        }
+        fetchActivos();
+    } catch (err) {
+        alert(err.response?.data?.detail || "Error al importar Excel");
+    } finally {
+        e.target.value = ''; // Limpiar input
+    }
+  };
+
+  // --- LÓGICA DE FIRMA ---
+  const startDrawing = (e) => { setIsDrawing(true); const ctx = canvasRef.current.getContext('2d'); const rect = canvasRef.current.getBoundingClientRect(); ctx.beginPath(); ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top); ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.strokeStyle = "#000"; };
+  const draw = (e) => { if (!isDrawing) return; const ctx = canvasRef.current.getContext('2d'); const rect = canvasRef.current.getBoundingClientRect(); ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top); ctx.stroke(); };
   const stopDrawing = () => setIsDrawing(false);
+  const limpiarFirma = () => canvasRef.current.getContext('2d').clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  const guardarFirma = () => { setFirmaDigital(canvasRef.current.toDataURL("image/png")); setMostrarModalFirma(false); };
 
-  const limpiarFirma = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // --- HELPERS UI ---
+  const getEstatusBadge = (s) => {
+    const styles = { 'Asignado': 'bg-green-50 text-green-700 border-green-200', 'Disponible': 'bg-blue-50 text-blue-700 border-blue-200', 'En Mantenimiento': 'bg-amber-50 text-amber-700 border-amber-200', 'Dado de Baja': 'bg-red-50 text-red-700 border-red-200' };
+    return styles[s] || 'bg-slate-100 text-slate-600 border-slate-200';
   };
 
-  const guardarFirma = () => {
-    const canvas = canvasRef.current;
-    setFirmaDigital(canvas.toDataURL("image/png"));
-    setMostrarModalFirma(false);
+  const calcularSaludActivo = (activo) => {
+    if (!activo.fecha_proximo_mantenimiento) return 100;
+    
+    const ahora = new Date();
+    const proximo = new Date(activo.fecha_proximo_mantenimiento);
+    const ultimo = activo.fecha_ultimo_mantenimiento ? new Date(activo.fecha_ultimo_mantenimiento) : new Date(activo.fecha_compra);
+    
+    const totalMs = proximo - ultimo;
+    const transcurridoMs = ahora - ultimo;
+    
+    // Si ya venció o el total es inválido
+    if (totalMs <= 0 || ahora >= proximo) return 0;
+    
+    // Si aún no llega la fecha del último (caso raro de fecha futura)
+    if (ahora <= ultimo) return 100;
+
+    const porcentaje = Math.max(0, Math.min(100, 100 - (transcurridoMs / totalMs) * 100));
+    return Math.round(porcentaje);
   };
 
-  // --- PROCESAMIENTO DEL DOCUMENTO DE RESGUARDO ---
-  const generarPaginasResguardo = (activo) => {
-    if (!activo) return [];
-    let texto = plantillaResguardo;
-    texto = texto.replace(/{{ASIGNADO_A}}/g, activo.asignado_a);
-    texto = texto.replace(/{{DEPARTAMENTO}}/g, activo.departamento);
-    texto = texto.replace(/{{FECHA}}/g, new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }));
-    return texto.split('{{SALTO_DE_PAGINA}}');
-  };
+  const activosFiltrados = activos.filter(a => {
+    const cumpleCategoria = filtroCategoria === 'Todas' || a.categoria === filtroCategoria;
+    const searchLower = busqueda.toLowerCase();
+    const cumpleBusqueda = 
+      a.codigo?.toLowerCase().includes(searchLower) ||
+      a.nombre?.toLowerCase().includes(searchLower) ||
+      a.modelo?.toLowerCase().includes(searchLower) ||
+      a.serie?.toLowerCase().includes(searchLower) ||
+      a.marca_nombre?.toLowerCase().includes(searchLower) ||
+      a.asignado_a?.toLowerCase().includes(searchLower);
+    return cumpleCategoria && cumpleBusqueda;
+  });
 
-  const renderizarContenidoDocumento = (textoPagina, activoResguardo) => {
-    // Dividimos el texto usando los dos tokens especiales que tenemos
-    const partes = textoPagina.split(/(\{\{TABLA_ACTIVOS\}\}|\{\{ESPACIO_FIRMA\}\})/g);
+  const activosPaginados = activosFiltrados.slice((paginaActual - 1) * itemsPorPagina, paginaActual * itemsPorPagina);
 
-    return partes.map((parte, index) => {
-      if (parte === '{{TABLA_ACTIVOS}}') {
-        const misActivos = activos.filter(a => a.asignado_a === activoResguardo.asignado_a && a.asignado_a !== 'Sin Asignar');
-        return (
-          <table key={`tabla-${index}`} className="w-full text-sm border-collapse border border-slate-300 my-6 shadow-sm" style={{ fontSize: '13px' }}>
-            <thead>
-              <tr className="bg-slate-100 text-slate-700">
-                <th className="border border-slate-300 p-3 text-left font-black">Categoría</th>
-                <th className="border border-slate-300 p-3 text-left font-black">Marca y Modelo</th>
-                <th className="border border-slate-300 p-3 text-left font-black">N° de Serie / ID</th>
+  return (
+    <div className="h-full flex flex-col relative overflow-hidden">
+      
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 print:hidden">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Inventario de Activos</h1>
+          <p className="text-sm text-slate-500 font-medium mt-1">Gestión integral del ciclo de vida y salud de activos.</p>
+        </div>
+        <div className="flex gap-2">
+          {puedeEditar && (
+            <>
+              {isAdmin && idsSeleccionados.length > 0 && (
+                <button onClick={() => setMostrarModalBajaDefinitiva(true)} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow-sm font-medium text-sm transition flex items-center gap-2">
+                    <i className="pi pi-trash text-xs"></i> Baja Definitiva ({idsSeleccionados.length})
+                </button>
+              )}
+              <button onClick={handleExportarExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded shadow-sm font-medium text-sm transition flex items-center gap-2">
+                <i className="pi pi-file-excel text-xs"></i> Exportar
+              </button>
+              {isAdmin && (
+                <>
+                  <button onClick={() => document.getElementById('import-excel-activos').click()} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded shadow-sm font-medium text-sm transition flex items-center gap-2">
+                    <i className="pi pi-upload text-xs"></i> Importar
+                  </button>
+                  <input type="file" id="import-excel-activos" className="hidden" accept=".xlsx, .xls" onChange={handleImportarExcel} />
+                </>
+              )}
+              <button onClick={() => setMostrarModalCatalogos(true)} className="bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 px-4 py-2 rounded shadow-sm font-semibold text-xs transition">
+                Catálogos
+              </button>
+              <button onClick={() => setMostrarModalAlta(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-sm font-medium text-sm transition flex items-center gap-2">
+                <i className="pi pi-plus text-xs"></i> Alta de Activo
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* FILTROS Y BUSQUEDA */}
+      <div className="flex flex-col md:flex-row gap-4 mb-6 w-full print:hidden">
+        <div className="relative flex-1">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <input type="text" placeholder="Buscar por código, serie, modelo, marca o asignado..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+            className="w-full bg-white border border-slate-300 text-slate-800 text-sm rounded shadow-sm pl-9 pr-4 py-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors" />
+        </div>
+        <div className="flex gap-2 overflow-x-auto custom-scrollbar-light pb-2 md:pb-0">
+          {['Todas', ...catalogoCategorias].map(cat => (
+            <button 
+              key={cat} 
+              onClick={() => setFiltroCategoria(cat)} 
+              className={`px-4 py-2 rounded font-semibold text-xs whitespace-nowrap transition-colors shadow-sm ${filtroCategoria === cat ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50'}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* TABLA PRINCIPAL */}
+      <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex-1 flex flex-col print:hidden">
+        <div className="flex-1 overflow-auto custom-scrollbar-light">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 bg-slate-50 z-10 border-b border-slate-200">
+              <tr className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th className="p-4 pl-6 w-10">
+                    {isAdmin && (
+                        <input type="checkbox" 
+                            checked={idsSeleccionados.length === activosPaginados.length && activosPaginados.length > 0}
+                            onChange={(e) => {
+                                if (e.target.checked) {
+                                    setIdsSeleccionados(activosPaginados.map(a => a.id));
+                                } else {
+                                    setIdsSeleccionados([]);
+                                }
+                            }}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                        />
+                    )}
+                </th>
+                <th className="p-4">Activo / Serie</th>
+                <th className="p-4">Especificaciones</th>
+                <th className="p-4">Asignación</th>
+                <th className="p-4">Estado Salud</th>
+                <th className="p-4 text-right pr-6">Acciones</th>
               </tr>
             </thead>
-            <tbody>
-              {misActivos.map((a, i) => (
-                <tr key={a.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                  <td className="border border-slate-300 p-3 font-semibold">{a.categoria}</td>
-                  <td className="border border-slate-300 p-3">{a.marca} {a.modelo}</td>
-                  <td className="border border-slate-300 p-3 font-mono">{a.serie}</td>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {cargando ? (
+                <tr><td colSpan="6" className="p-8 text-center text-slate-500">Sincronizando inventario...</td></tr>
+              ) : activosPaginados.map(a => (
+                <tr key={a.id} className="hover:bg-blue-50/50 transition-colors group">
+                  <td className="p-4 pl-6">
+                    {isAdmin && (
+                        <input type="checkbox" 
+                            checked={idsSeleccionados.includes(a.id)}
+                            onChange={() => toggleSeleccion(a.id)}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                        />
+                    )}
+                  </td>
+                  <td className="p-4">
+                    <p className="font-bold text-slate-800">{a.codigo}</p>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">{a.serie || 'S/N'}</p>
+                  </td>
+                  <td className="p-4">
+                    <p className="text-slate-700 font-semibold">{a.modelo}</p>
+                    <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wider mt-0.5">{a.marca_nombre} • {a.categoria}</p>
+                  </td>
+                  <td className="p-4">
+                    <p className="text-slate-700 font-semibold">{a.asignado_a}</p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider mt-1 inline-block ${getEstatusBadge(a.estatus)}`}>{a.estatus}</span>
+                  </td>
+                  <td className="p-4">
+                    <div className="w-32">
+                        <div className="flex justify-between text-[10px] font-medium text-slate-500 mb-1">
+                            <span>Próximo: {a.fecha_proximo_mantenimiento ? new Date(a.fecha_proximo_mantenimiento).toLocaleDateString() : 'N/A'}</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <div className={`h-full transition-all duration-1000 ${calcularSaludActivo(a) < 30 ? 'bg-red-500' : calcularSaludActivo(a) < 70 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${calcularSaludActivo(a)}%` }}></div>
+                        </div>
+                    </div>
+                  </td>
+                  <td className="p-4 text-right pr-6">
+                    <button onClick={() => setActivoSeleccionado(a)} className="text-blue-600 font-semibold text-xs bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded border border-blue-200 transition-colors">Ver Detalles</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        );
-      }
-
-      if (parte === '{{ESPACIO_FIRMA}}') {
-        return firmaDigital ? (
-          <div key={`firma-${index}`} className="my-2">
-            <img src={firmaDigital} alt="Firma Electrónica" className="h-20 object-contain mix-blend-multiply border-b border-black w-64" />
-          </div>
-        ) : (
-          <div key={`firma-${index}`} className="my-2">
-            <span className="inline-block w-64 border-b border-black h-12 align-bottom mb-1"></span>
-          </div>
-        );
-      }
-
-      return <span key={`texto-${index}`}>{parte}</span>;
-    });
-  };
-
-  const handleAgregarCatalogo = (e) => {
-    e.preventDefault();
-    if (!nuevoItemCatalogo.trim()) return;
-    if (pestañaCatalogo === 'marcas' && !catalogoMarcas.includes(nuevoItemCatalogo)) setCatalogoMarcas([...catalogoMarcas, nuevoItemCatalogo.trim()]);
-    else if (pestañaCatalogo === 'proveedores' && !catalogoProveedores.includes(nuevoItemCatalogo)) setCatalogoProveedores([...catalogoProveedores, nuevoItemCatalogo.trim()]);
-    else if (pestañaCatalogo === 'software' && !catalogoSoftware.includes(nuevoItemCatalogo)) setCatalogoSoftware([...catalogoSoftware, nuevoItemCatalogo.trim()]);
-    setNuevoItemCatalogo("");
-  };
-
-  const handleEliminarCatalogo = (itemEliminar) => {
-    if (!window.confirm(`¿Seguro que deseas eliminar "${itemEliminar}" del catálogo?`)) return;
-    if (pestañaCatalogo === 'marcas') setCatalogoMarcas(catalogoMarcas.filter(item => item !== itemEliminar));
-    else if (pestañaCatalogo === 'proveedores') setCatalogoProveedores(catalogoProveedores.filter(item => item !== itemEliminar));
-    else if (pestañaCatalogo === 'software') setCatalogoSoftware(catalogoSoftware.filter(item => item !== itemEliminar));
-  };
-
-  // --- ALTA DE ACTIVO ---
-  const handleAltaActivo = (e) => {
-    e.preventDefault();
-    const nuevoActivo = {
-      id: Date.now(),
-      ...formNuevoActivo,
-      costo: Number(formNuevoActivo.costo),
-      asignado_a: 'Sin Asignar', departamento: 'Sistemas', estatus: 'Disponible', software_instalado: [],
-      historial: [{ id: Date.now() + 1, fecha: formatFecha(), accion: 'Alta de Activo', usuario_involucrado: user?.nombre_completo || 'Admin', notas: `Ingresado al sistema por ${formatoMoneda(formNuevoActivo.costo)}.` }]
-    };
-    setActivos([nuevoActivo, ...activos]);
-    setFormNuevoActivo({ serie: '', modelo: '', marca: '', categoria: 'Computadoras', proveedor: '', fecha_compra: '', anios_garantia: 1, costo: '', prox_mantenimiento: '' });
-    setMostrarModalAlta(false);
-  };
-
-  // --- EDICIÓN DE ACTIVO ---
-  const abrirModalEdicion = () => {
-    setFormEditarActivo({ ...activoSeleccionado });
-    setMostrarModalEditar(true);
-  };
-
-  const handleGuardarEdicion = (e) => {
-    e.preventDefault();
-    const nuevoHistorialEntry = { id: Date.now(), fecha: formatFecha(), accion: 'Edición de Datos', usuario_involucrado: user?.nombre_completo || 'Admin', notas: 'Se actualizaron los datos maestros del equipo.' };
-    const activoModificado = { ...formEditarActivo, costo: Number(formEditarActivo.costo) };
-    const activosActualizados = activos.map(a => a.id === formEditarActivo.id ? { ...activoModificado, historial: [nuevoHistorialEntry, ...a.historial] } : a);
-    setActivos(activosActualizados);
-    setActivoSeleccionado(activoModificado);
-    setMostrarModalEditar(false);
-  };
-
-  const handleCambioUsuarioReasignar = (e) => {
-    const nombreTecleado = e.target.value;
-    const usuarioInfo = catalogoUsuarios.find(u => u.nombre === nombreTecleado);
-    setFormReasignar({ ...formReasignar, nuevo_asignado: nombreTecleado, nuevo_departamento: usuarioInfo ? usuarioInfo.departamento : '' });
-  };
-
-  const handleReasignar = (e) => {
-    e.preventDefault();
-    const usuarioValido = catalogoUsuarios.find(u => u.nombre === formReasignar.nuevo_asignado);
-    if (!usuarioValido) { alert("⚠️ Error: El usuario ingresado no existe en el Directorio.\n\nPor favor, selecciona un usuario de la lista."); return; }
-
-    const nuevoHistorialEntry = { id: Date.now(), fecha: formatFecha(), accion: 'Reasignación de Equipo', usuario_involucrado: formReasignar.nuevo_asignado, notas: `Entregado por ${user?.nombre_completo || 'Admin'}. Notas: ${formReasignar.notas}` };
-    let activoActualizadoParaResguardo = null;
-
-    const activosActualizados = activos.map(a => {
-      if (a.id === activoSeleccionado.id) {
-        const activoActualizado = { ...a, asignado_a: formReasignar.nuevo_asignado, departamento: formReasignar.nuevo_departamento, estatus: 'Activo', historial: [nuevoHistorialEntry, ...a.historial] };
-        setActivoSeleccionado(activoActualizado);
-        activoActualizadoParaResguardo = activoActualizado;
-        return activoActualizado;
-      }
-      return a;
-    });
-
-    setActivos(activosActualizados);
-    setFormReasignar({ nuevo_asignado: '', nuevo_departamento: '', notas: '' });
-    setMostrarModalReasignar(false);
-    setPestañaActiva('detalles');
-    if (activoActualizadoParaResguardo) {
-      setFirmaDigital(null); // Reseteamos la firma para el nuevo resguardo
-      setActivoParaResguardo(activoActualizadoParaResguardo);
-    }
-  };
-
-  const handleCambiarEstatus = (e) => {
-    e.preventDefault();
-    let nuevoAsignado = activoSeleccionado.asignado_a;
-    let nuevoDepartamento = activoSeleccionado.departamento;
-    let advertenciaDesasignacion = "";
-
-    if (['Disponible', 'Dado de Baja', 'Obsoleto'].includes(formEstatus.nuevo_estatus)) {
-      if (nuevoAsignado !== 'Sin Asignar') {
-        advertenciaDesasignacion = ` Se retiró la asignación de ${nuevoAsignado}.`;
-        nuevoAsignado = 'Sin Asignar';
-        nuevoDepartamento = 'Sistemas';
-      }
-    }
-
-    const nuevoHistorialEntry = { id: Date.now(), fecha: formatFecha(), accion: `Cambio de Estado: ${formEstatus.nuevo_estatus}`, usuario_involucrado: user?.nombre_completo || 'Admin', notas: `${formEstatus.notas}.${advertenciaDesasignacion}` };
-    const activosActualizados = activos.map(a => a.id === activoSeleccionado.id ? { ...a, estatus: formEstatus.nuevo_estatus, asignado_a: nuevoAsignado, departamento: nuevoDepartamento, historial: [nuevoHistorialEntry, ...a.historial] } : a);
-    setActivos(activosActualizados);
-    setEditandoEstatus(false);
-    setFormEstatus({ nuevo_estatus: '', notas: '' });
-  };
-
-  const agregarSoftware = () => {
-    if (!nuevoSoftwareAsignar) return;
-    const activosActualizados = activos.map(a => a.id === activoSeleccionado.id ? { ...a, software_instalado: [...a.software_instalado, nuevoSoftwareAsignar], historial: [{ id: Date.now(), fecha: formatFecha(), accion: 'Instalación de Software', usuario_involucrado: user?.nombre_completo || 'Admin', notas: `Asignación de: ${nuevoSoftwareAsignar}` }, ...a.historial] } : a);
-    setActivos(activosActualizados);
-    setNuevoSoftwareAsignar("");
-  };
-
-  const quitarSoftware = (software) => {
-    if (!window.confirm(`¿Estás seguro de desasignar la licencia de ${software} de este equipo?`)) return;
-    const activosActualizados = activos.map(a => a.id === activoSeleccionado.id ? { ...a, software_instalado: a.software_instalado.filter(s => s !== software), historial: [{ id: Date.now(), fecha: formatFecha(), accion: 'Remoción de Software', usuario_involucrado: user?.nombre_completo || 'Admin', notas: `Se removió la licencia de: ${software}` }, ...a.historial] } : a);
-    setActivos(activosActualizados);
-  };
-
-  const contarActivosDelUsuario = (nombre) => {
-    if (nombre === 'Sin Asignar') return 0;
-    return activos.filter(a => a.asignado_a === nombre).length;
-  };
-
-  return (
-    <div className="relative h-full flex flex-col">
-      {/* HEADER PRINCIPAL */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 print:hidden">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">CMDB e Inventario</h1>
-          <p className="text-sm text-slate-400 font-medium mt-1">Gestión de Hardware, Software, Garantías y Resguardos.</p>
         </div>
-        <div className="flex items-center gap-3">
-          {['Admin', 'Tecnico'].includes(user?.rol) && (
-            <button onClick={() => setMostrarModalCatalogos(true)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition border border-slate-700 flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg>
-              Ajustes
-            </button>
-          )}
-          <button onClick={() => { setFormNuevoActivo({ serie: '', modelo: '', marca: '', categoria: 'Computadoras', proveedor: '', fecha_compra: '', anios_garantia: 1, costo: '', prox_mantenimiento: '' }); setMostrarModalAlta(true); }} className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition shadow-lg shadow-cyan-900/50 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-            Alta de Activo
-          </button>
-        </div>
+        <Pagination totalItems={activosFiltrados.length} itemsPerPage={itemsPorPagina} currentPage={paginaActual} onPageChange={setPaginaActual} onItemsPerPageChange={setItemsPorPagina} />
       </div>
 
-      <div className="flex gap-2 mb-6 overflow-x-auto custom-scrollbar pb-2 print:hidden">
-        {['Todas', 'Computadoras', 'Celulares', 'Lineas', 'Perifericos'].map(cat => (
-          <button key={cat} onClick={() => setFiltroCategoria(cat)} className={`px-4 py-2 rounded-lg font-bold text-xs uppercase tracking-wider transition whitespace-nowrap flex items-center gap-2 ${filtroCategoria === cat ? 'bg-cyan-600/20 text-cyan-400 border border-cyan-500/50 shadow-sm' : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700'}`}>
-            {cat !== 'Todas' && getCategoriaIcon(cat)} {cat}
-          </button>
-        ))}
-      </div>
-
-      {/* TABLA PRINCIPAL */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex-1 flex flex-col shadow-sm print:hidden">
-        <div className="flex-1 overflow-auto custom-scrollbar">
-          <table className="w-full text-left border-collapse">
-            <thead className="sticky top-0 bg-slate-900 z-10">
-              <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-widest">
-                <th className="p-4 pl-6">N° Serie / Etiqueta</th><th className="p-4">Modelo y Marca</th><th className="p-4">Asignado a</th><th className="p-4">Estado Garantía</th><th className="p-4">Estatus</th><th className="p-4 text-right pr-6">Acción</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50 text-sm">
-              {activosFiltrados.map((activo) => {
-                const garantia = calcularEstadoGarantia(activo.fecha_compra, activo.anios_garantia);
-                return (
-                  <tr key={activo.id} className="hover:bg-slate-800/30 transition-colors group">
-                    <td className="p-4 pl-6 font-bold text-white flex items-center gap-3"><div className="p-2 bg-slate-800 rounded border border-slate-700 text-cyan-500">{getCategoriaIcon(activo.categoria)}</div>{activo.serie}</td>
-                    <td className="p-4"><p className="font-bold text-slate-200 mb-0.5">{activo.modelo}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{activo.marca}</p></td>
-                    <td className="p-4"><p className={`font-bold ${activo.asignado_a === 'Sin Asignar' ? 'text-slate-500 italic' : 'text-slate-300'} mb-0.5`}>{activo.asignado_a}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-500">{activo.departamento}</p></td>
-                    <td className="p-4">
-                      {garantia.estado === 'Por Expirar' && <div className="flex items-center gap-1.5 text-orange-400 font-bold text-xs bg-orange-500/10 px-2 py-1 rounded border border-orange-500/20 inline-flex">Expira en {garantia.dias} días</div>}
-                      {garantia.estado === 'Expirada' && <div className="flex items-center gap-1.5 text-red-500 font-bold text-xs">Expirada</div>}
-                      {garantia.estado === 'Vigente' && <div className="flex items-center gap-1.5 text-green-500 font-bold text-xs">Vigente ({garantia.dias} días)</div>}
-                      {garantia.estado === 'Sin Dato' && <span className="text-slate-600 text-xs font-bold">N/A</span>}
-                    </td>
-                    <td className="p-4"><span className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest border uppercase ${getEstatusBadge(activo.estatus)}`}>{activo.estatus}</span></td>
-                    <td className="p-4 text-right pr-6"><button onClick={() => { setActivoSeleccionado(activo); setPestañaActiva('detalles'); setMostrarModalReasignar(false); setEditandoEstatus(false); }} className="text-cyan-400 hover:text-white transition font-bold text-[10px] uppercase tracking-widest bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 px-3 py-1.5 rounded">Inspeccionar</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ========================================= */}
-      {/* MODAL GESTOR DE CATÁLOGOS                 */}
-      {/* ========================================= */}
-      {mostrarModalCatalogos && (
-        <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/80 backdrop-blur-sm transition-opacity print:hidden">
-          <div className="w-full md:w-[600px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col h-full animate-slide-in-right">
-            <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-slate-700 rounded-lg border border-slate-600 text-slate-300"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg></div>
-                <div><h2 className="text-lg font-black text-white">Ajustes Generales</h2><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Catálogos y Documentos</p></div>
-              </div>
-              <button onClick={() => setMostrarModalCatalogos(false)} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div className="flex border-b border-slate-800 px-6 pt-4 gap-6 bg-slate-900 overflow-x-auto custom-scrollbar">
-              <button onClick={() => setPestañaCatalogo('empresa')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${pestañaCatalogo === 'empresa' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Empresa</button>
-              <button onClick={() => setPestañaCatalogo('marcas')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${pestañaCatalogo === 'marcas' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Marcas</button>
-              <button onClick={() => setPestañaCatalogo('proveedores')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${pestañaCatalogo === 'proveedores' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Proveedores</button>
-              <button onClick={() => setPestañaCatalogo('resguardo')} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${pestañaCatalogo === 'resguardo' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Plantilla PDF</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-950/30 flex flex-col">
-              {pestañaCatalogo === 'empresa' && (
-                <div className="space-y-6">
-                  <div className="bg-slate-900 border border-slate-700 p-5 rounded-xl">
-                    <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2"><svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg> Identidad Visual</h3>
-                    <div className="space-y-4">
-                      <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Nombre Oficial</label><input type="text" value={configEmpresa.nombre} onChange={(e) => setConfigEmpresa({ ...configEmpresa, nombre: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-3 py-2.5 outline-none focus:border-cyan-500" /></div>
-                      <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">URL del Logo</label><input type="text" value={configEmpresa.logoUrl} onChange={(e) => setConfigEmpresa({ ...configEmpresa, logoUrl: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-lg px-3 py-2.5 outline-none focus:border-cyan-500" /></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {['marcas', 'proveedores'].includes(pestañaCatalogo) && (
-                <>
-                  <form onSubmit={handleAgregarCatalogo} className="mb-6 bg-slate-900 p-4 rounded-xl border border-slate-800">
-                    <div className="flex gap-2">
-                      <input type="text" value={nuevoItemCatalogo} onChange={(e) => setNuevoItemCatalogo(e.target.value)} placeholder="Agregar nuevo..." className="flex-1 bg-slate-950 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 outline-none" />
-                      <button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-lg font-bold text-xs uppercase transition">Añadir</button>
-                    </div>
-                  </form>
-                  <div className="space-y-2">
-                    {(pestañaCatalogo === 'marcas' ? catalogoMarcas : catalogoProveedores).map(item => (
-                      <div key={item} className="flex justify-between items-center bg-slate-800/50 px-4 py-2.5 rounded-lg border border-slate-700/50 group"><span className="text-sm font-bold text-slate-200">{item}</span><button onClick={() => handleEliminarCatalogo(item)} className="text-slate-500 hover:text-red-500"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></div>
-                    ))}
-                  </div>
-                </>
-              )}
-              {pestañaCatalogo === 'resguardo' && (
-                <div className="flex-1 flex flex-col h-full">
-                  <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 p-3 rounded-t-xl mb-0 border-b-0">
-                    <button onClick={() => setDocStyle({ ...docStyle, fontSize: Math.max(10, docStyle.fontSize - 1) })} className="w-8 h-8 bg-slate-800 hover:bg-cyan-600 text-white rounded">-</button>
-                    <span className="text-white text-xs font-bold w-6 text-center">{docStyle.fontSize}</span>
-                    <button onClick={() => setDocStyle({ ...docStyle, fontSize: Math.min(24, docStyle.fontSize + 1) })} className="w-8 h-8 bg-slate-800 hover:bg-cyan-600 text-white rounded">+</button>
-                    <div className="w-px h-6 bg-slate-700 mx-2"></div>
-                    <button onClick={() => setDocStyle({ ...docStyle, textAlign: 'left' })} className={`w-8 h-8 rounded ${docStyle.textAlign === 'left' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400'}`}>L</button>
-                    <button onClick={() => setDocStyle({ ...docStyle, textAlign: 'justify' })} className={`w-8 h-8 rounded ${docStyle.textAlign === 'justify' ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400'}`}>J</button>
-                  </div>
-                  <textarea value={plantillaResguardo} onChange={(e) => setPlantillaResguardo(e.target.value)} className="flex-1 w-full bg-slate-950 border border-slate-700 text-slate-300 text-sm p-4 outline-none rounded-b-xl" style={{ minHeight: '300px' }}></textarea>
-                </div>
-              )}
-            </div>
-            <div className="p-6 border-t border-slate-800 bg-slate-900">
-              <button onClick={() => setMostrarModalCatalogos(false)} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider transition">Cerrar Ajustes</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================= */}
-      {/* MODAL ALTA Y EDICIÓN DE ACTIVO (Reducido por brevedad en este bloque) */}
-      {/* ========================================= */}
-      {(mostrarModalAlta || mostrarModalEditar) && (
-        <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/80 backdrop-blur-sm transition-opacity print:hidden">
-          <div className="w-full md:w-[600px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col h-full animate-slide-in-right">
-            <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg border ${mostrarModalAlta ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'}`}>
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-                </div>
-                <div><h2 className="text-lg font-black text-white">{mostrarModalAlta ? 'Alta de Nuevo Activo' : 'Editar Datos Maestros'}</h2></div>
-              </div>
-              <button onClick={() => { setMostrarModalAlta(false); setMostrarModalEditar(false); }} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-              <form id="form-activo" onSubmit={mostrarModalAlta ? handleAltaActivo : handleGuardarEdicion} className="space-y-5">
-                {/* Aquí van los campos del form. Usando una variable temporal para acortar */}
-                {(() => {
-                  const estadoF = mostrarModalAlta ? formNuevoActivo : formEditarActivo;
-                  const setEstadoF = mostrarModalAlta ? setFormNuevoActivo : setFormEditarActivo;
-                  return (
-                    <>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">N° de Serie *</label><input type="text" required value={estadoF.serie} onChange={(e) => setEstadoF({ ...estadoF, serie: e.target.value.toUpperCase() })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500 uppercase" /></div>
-                        <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Categoría *</label><select value={estadoF.categoria} onChange={(e) => setEstadoF({ ...estadoF, categoria: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500"><option value="Computadoras">Computadoras</option><option value="Celulares">Celulares</option><option value="Perifericos">Periféricos</option></select></div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Marca *</label><select required value={estadoF.marca} onChange={(e) => setEstadoF({ ...estadoF, marca: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500"><option value="" disabled>Selecciona...</option>{catalogoMarcas.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-                        <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Modelo *</label><input type="text" required value={estadoF.modelo} onChange={(e) => setEstadoF({ ...estadoF, modelo: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500" /></div>
-                      </div>
-                      <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Proveedor *</label><select required value={estadoF.proveedor} onChange={(e) => setEstadoF({ ...estadoF, proveedor: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm rounded-lg px-4 py-3 outline-none focus:border-cyan-500"><option value="" disabled>Selecciona...</option>{catalogoProveedores.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-                      <div className={`grid grid-cols-2 gap-4 p-4 rounded-xl border ${mostrarModalAlta ? 'bg-cyan-900/10 border-cyan-900/30' : 'bg-slate-800/50 border-slate-700'}`}>
-                        <div className="col-span-2"><label className="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-2 block">Costo de Adquisición (MXN) *</label><input type="number" step="0.01" min="0" required value={estadoF.costo} onChange={(e) => setEstadoF({ ...estadoF, costo: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-mono rounded-lg px-4 py-3 outline-none focus:border-cyan-500" /></div>
-                        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Fecha de Compra *</label><input type="date" required value={estadoF.fecha_compra} onChange={(e) => setEstadoF({ ...estadoF, fecha_compra: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500" /></div>
-                        <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Años de Garantía *</label><input type="number" min="0" required value={estadoF.anios_garantia} onChange={(e) => setEstadoF({ ...estadoF, anios_garantia: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-4 py-3 outline-none focus:border-cyan-500" /></div>
-                      </div>
-                    </>
-                  )
-                })()}
-              </form>
-            </div>
-            <div className="p-6 border-t border-slate-800 bg-slate-900 flex justify-end gap-3">
-              <button onClick={() => { setMostrarModalAlta(false); setMostrarModalEditar(false); }} className="px-6 py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider text-slate-400 hover:text-white bg-slate-800 transition">Cancelar</button>
-              <button form="form-activo" type="submit" className={`px-6 py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider transition shadow-lg text-white ${mostrarModalAlta ? 'bg-cyan-600 hover:bg-cyan-500' : 'bg-yellow-600 hover:bg-yellow-500'}`}>{mostrarModalAlta ? 'Guardar Activo' : 'Actualizar'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DRAWER DETALLES / REASIGNAR DEL ACTIVO */}
-      {activoSeleccionado && !activoParaResguardo && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/80 backdrop-blur-sm transition-opacity print:hidden">
-          <div className="w-full md:w-[600px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col h-full animate-slide-in-right">
-            <div className="px-6 py-5 border-b border-slate-800 flex justify-between items-start bg-slate-800/50 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full bg-cyan-500"></div>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-widest text-cyan-500 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20 mb-2 inline-block">{activoSeleccionado.categoria}</span>
-                <div className="flex items-center gap-3"><h2 className="text-2xl font-black text-white mb-1">{activoSeleccionado.modelo}</h2><button onClick={abrirModalEdicion} className="bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white p-1.5 rounded transition shadow" title="Editar Datos Maestros"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg></button></div>
-                <p className="text-sm font-bold text-slate-400 font-mono">SN: {activoSeleccionado.serie}</p>
-              </div>
-              <button onClick={() => { setActivoSeleccionado(null); setMostrarModalReasignar(false); setEditandoEstatus(false); }} className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full transition z-10"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div className="flex border-b border-slate-800 px-6 pt-4 gap-6 bg-slate-900 overflow-x-auto custom-scrollbar">
-              <button onClick={() => { setPestañaActiva('detalles'); setMostrarModalReasignar(false); }} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap ${pestañaActiva === 'detalles' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Hardware y Estado</button>
-              {['Computadoras', 'Celulares'].includes(activoSeleccionado.categoria) && (
-                <button onClick={() => { setPestañaActiva('software'); setMostrarModalReasignar(false); }} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${pestañaActiva === 'software' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Software <span className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[9px]">{activoSeleccionado.software_instalado?.length || 0}</span></button>
-              )}
-              <button onClick={() => { setPestañaActiva('historial'); setMostrarModalReasignar(false); }} className={`pb-3 text-xs font-bold uppercase tracking-widest transition-colors border-b-2 whitespace-nowrap flex items-center gap-2 ${pestañaActiva === 'historial' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>Historial <span className="bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded text-[9px]">{activoSeleccionado.historial.length}</span></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-950/30">
-              {pestañaActiva === 'detalles' && !mostrarModalReasignar && (
-                <div className="space-y-6">
-                  {/* Posesión y Resguardo */}
-                  <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5 relative overflow-hidden">
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Posesión Actual</h3>
-                    <div className="flex justify-between items-center mb-5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-black border-2 border-slate-600">{activoSeleccionado.asignado_a !== 'Sin Asignar' ? activoSeleccionado.asignado_a.charAt(0) : '?'}</div>
-                        <div><p className={`font-bold text-sm ${activoSeleccionado.asignado_a === 'Sin Asignar' ? 'text-slate-400 italic' : 'text-white'}`}>{activoSeleccionado.asignado_a}</p><p className="text-xs text-slate-400">{activoSeleccionado.departamento}</p></div>
-                      </div>
-                      <button onClick={() => setMostrarModalReasignar(true)} className="bg-slate-900 hover:bg-slate-800 border border-slate-600 hover:border-cyan-500 hover:text-cyan-400 text-white px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest transition">Reasignar</button>
-                    </div>
-                    <button onClick={() => { setFirmaDigital(null); setActivoParaResguardo(activoSeleccionado); }} disabled={activoSeleccionado.asignado_a === 'Sin Asignar'} className="w-full bg-cyan-900/20 border border-cyan-500/30 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-cyan-400 p-3 rounded-xl flex items-center justify-center gap-3 transition">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                      <span className="text-xs font-bold uppercase tracking-widest">Generar Resguardo ({contarActivosDelUsuario(activoSeleccionado.asignado_a)} equipos)</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-y-6 gap-x-4 border border-slate-800 bg-slate-900/50 p-5 rounded-xl">
-                    <div><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Proveedor / Marca</p><p className="text-sm font-bold text-slate-200">{activoSeleccionado.marca}</p><p className="text-[10px] text-slate-500">{activoSeleccionado.proveedor}</p></div>
-                    <div className="text-right"><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Costo de Adquisición</p><p className="text-lg font-black text-green-400 font-mono">{formatoMoneda(activoSeleccionado.costo)}</p></div>
-                    <div className="col-span-2 bg-slate-950 p-3 rounded-lg border border-slate-800 flex justify-between items-center mt-2">
-                      <div><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Garantía ({activoSeleccionado.anios_garantia} años)</p><p className="text-sm font-bold text-white">Comprado: {activoSeleccionado.fecha_compra}</p></div>
-                      <div className="text-right">
-                        {(() => {
-                          const gar = calcularEstadoGarantia(activoSeleccionado.fecha_compra, activoSeleccionado.anios_garantia);
-                          if (gar.estado === 'Por Expirar') return <span className="text-xs font-bold text-orange-400 bg-orange-500/10 px-2 py-1 rounded border border-orange-500/20">Vence: {gar.fechaVence}</span>;
-                          if (gar.estado === 'Expirada') return <span className="text-xs font-bold text-red-500">Expiró el {gar.fechaVence}</span>;
-                          return <span className="text-xs font-bold text-green-500">Vigente hasta {gar.fechaVence}</span>;
-                        })()}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={`border rounded-xl p-5 transition-colors ${editandoEstatus ? 'bg-slate-900 border-cyan-500/50' : 'bg-slate-900/50 border-slate-800'}`}>
-                    <div className="flex justify-between items-center mb-4"><p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Estado Físico y Operativo</p>{!editandoEstatus ? (<button onClick={() => { setEditandoEstatus(true); setFormEstatus({ nuevo_estatus: activoSeleccionado.estatus, notas: '' }); }} className="text-slate-400 hover:text-cyan-400 text-xs font-bold uppercase tracking-widest transition">Modificar</button>) : (<button onClick={() => setEditandoEstatus(false)} className="text-slate-400 hover:text-red-400 text-xs font-bold uppercase tracking-widest transition">Cancelar</button>)}</div>
-                    {!editandoEstatus ? (<div><span className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-widest border uppercase inline-block ${getEstatusBadge(activoSeleccionado.estatus)}`}>{activoSeleccionado.estatus}</span></div>) : (
-                      <form onSubmit={handleCambiarEstatus} className="space-y-4">
-                        <select required value={formEstatus.nuevo_estatus} onChange={(e) => setFormEstatus({ ...formEstatus, nuevo_estatus: e.target.value })} className="w-full bg-slate-950 border border-slate-700 text-white text-sm font-bold rounded-lg px-3 py-2 outline-none focus:border-cyan-500">
-                          <option value="Activo">Activo (En uso)</option><option value="Disponible">Disponible (En almacén)</option><option value="En Reparacion">En Reparación</option><option value="Obsoleto">Obsoleto</option><option value="Dado de Baja">Dado de Baja</option>
-                        </select>
-                        <textarea required value={formEstatus.notas} onChange={(e) => setFormEstatus({ ...formEstatus, notas: e.target.value })} placeholder="Motivo o diagnóstico..." className="w-full bg-slate-950 border border-slate-700 text-slate-300 text-sm rounded-lg px-3 py-2 outline-none h-20 resize-none"></textarea>
-                        <button type="submit" className="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg font-bold text-xs uppercase transition">Guardar Estado</button>
-                      </form>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* Vistas omitidas (software, reasignar, historial) ya funcionales */}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================= */}
-      {/* VISTA DE IMPRESIÓN DEL RESGUARDO          */}
-      {/* ========================================= */}
-      {activoParaResguardo && (
-        <div className="fixed inset-0 z-[90] flex justify-center items-start pt-10 pb-10 bg-slate-950/90 backdrop-blur-md overflow-y-auto print:bg-white print:pt-0 print:pb-0">
-          <div className="w-full max-w-3xl bg-white text-black min-h-[800px] shadow-2xl relative print:shadow-none print:m-0">
-
-            {/* BOTONES DE ACCIÓN (Solo visibles en pantalla) */}
-            <div className="absolute top-4 right-4 flex gap-2 print:hidden z-10">
-              <button onClick={() => setMostrarModalFirma(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold text-xs flex items-center gap-2 shadow-lg">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-                Firmar Digitalmente
+      {/* DRAWER DETALLES (Expediente Digital) */}
+      {activoSeleccionado && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-sm transition-opacity print:hidden">
+          <div className="w-full md:w-[450px] bg-white border-l border-slate-200 p-8 animate-slide-in-right shadow-2xl flex flex-col h-full">
+            <div className="flex justify-between items-center mb-8 pb-4 border-b border-slate-200">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <i className="pi pi-box text-slate-400"></i>
+                Detalles del Activo
+              </h2>
+              <button onClick={() => setActivoSeleccionado(null)} className="text-slate-400 hover:bg-slate-100 p-2 rounded transition">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               </button>
-              <button onClick={() => window.print()} className="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded font-bold text-xs flex items-center gap-2 shadow-lg"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg> Imprimir PDF</button>
-              <button onClick={() => setActivoParaResguardo(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-2 rounded font-bold text-xs">Cerrar</button>
             </div>
 
-            {/* DOCUMENTO RENDERIZADO */}
-            {generarPaginasResguardo(activoParaResguardo).map((textoPagina, i, arr) => (
-              <div key={i} className={`p-12 print:p-0 print:m-0 ${i > 0 ? 'salto-pagina mt-8 print:mt-0 border-t-8 border-dashed border-slate-200 print:border-none' : ''}`}>
-                <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-8">
-                  <div className="flex items-center gap-5">
-                    {configEmpresa.logoUrl && <img src={configEmpresa.logoUrl} alt="Logo" className="h-16 w-auto object-contain" onError={(e) => e.target.style.display = 'none'} />}
-                    <div><h1 className="text-2xl font-black">{configEmpresa.nombre || 'Nombre de Empresa'}</h1><p className="text-sm font-medium text-slate-600">Departamento de TI</p></div>
+            <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar-light pr-2">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 relative shadow-sm">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Información General</p>
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 rounded-lg bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-lg shadow-inner">
+                    {activoSeleccionado.categoria.substring(0, 2).toUpperCase()}
                   </div>
-                  <div className="text-right"><p className="text-xs font-bold text-slate-500">Folio: RESP-{activoParaResguardo.asignado_a.replace(/\s+/g, '').toUpperCase()}</p></div>
+                  <div>
+                    <p className="text-lg font-bold text-slate-800 pr-4">{activoSeleccionado.modelo}</p>
+                    <p className="text-blue-600 font-medium text-sm">{activoSeleccionado.codigo}</p>
+                  </div>
                 </div>
-                <div className="whitespace-pre-wrap leading-relaxed min-h-[500px]" style={{ fontSize: `${docStyle.fontSize}px`, textAlign: docStyle.textAlign, fontFamily: 'system-ui, sans-serif' }}>
-                  {renderizarContenidoDocumento(textoPagina.trim(), activoParaResguardo)}
-                </div>
-                <div className="mt-12 pt-8 border-t border-slate-300 flex justify-between items-center text-xs text-slate-500">
-                  <div><p>Documento interno. Generado por CMDB.</p></div>
-                  <div className="font-bold">Página {i + 1} de {arr.length}</div>
+
+                <div className="mt-5 pt-4 border-t border-slate-200 flex gap-2 flex-wrap">
+                  <span className="px-2.5 py-1 rounded text-[10px] font-bold border uppercase tracking-wider bg-blue-50 text-blue-700 border-blue-200">{activoSeleccionado.categoria}</span>
+                  <span className={`px-2.5 py-1 rounded text-[10px] font-bold border uppercase tracking-wider ${getEstatusBadge(activoSeleccionado.estatus)}`}>{activoSeleccionado.estatus}</span>
                 </div>
               </div>
-            ))}
+
+              {/* ACCIONES RÁPIDAS (NUEVO UX) */}
+              {puedeEditar && (
+                <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => handleAbrirEditar(activoSeleccionado)} 
+                        title="Editar Activo"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-blue-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-pencil text-blue-500 text-sm"></i> EDITAR
+                    </button>
+                    <button onClick={() => {
+                        setFormReasignar({ nuevo_asignado_id: '', notas: '', licencias_ids: activoSeleccionado.licencias?.map(l => l.id) || [] });
+                        setMostrarModalReasignar(true);
+                    }} 
+                        title="Reasignar Usuario"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-amber-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-user-edit text-amber-500 text-sm"></i> REASIG.
+                    </button>
+                    <button onClick={() => handleLiberarAStock(activoSeleccionado)} 
+                        title="Liberar a Stock"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-refresh text-slate-500 text-sm"></i> STOCK
+                    </button>
+                    <button onClick={() => setMostrarModalResguardo(true)} 
+                        title="Generar Resguardo PDF"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-emerald-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-file-pdf text-emerald-500 text-sm"></i> PDF
+                    </button>
+                    <button onClick={() => handleSoftDelete(activoSeleccionado)} 
+                        title="Dar de Baja"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-red-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-trash text-red-500 text-sm"></i> BAJA
+                    </button>
+                </div>
+              )}
+
+              {/* TABS SIMPLIFICADOS */}
+              <div className="flex gap-4 border-b border-slate-100">
+                {['detalles', 'specs', 'licencias', 'historial', 'bitacora'].map(t => (
+                    <button key={t} onClick={() => setPestañaActiva(t)} className={`pb-2 text-[10px] font-black uppercase tracking-wider transition-colors border-b-2 ${pestañaActiva === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                        {t === 'bitacora' ? 'Bitácora' : t === 'specs' ? 'Ficha' : t === 'licencias' ? 'Licencias' : t}
+                    </button>
+                ))}
+              </div>
+
+              {pestañaActiva === 'licencias' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Software del Usuario Asignado</p>
+                  </div>
+                  {(!activoSeleccionado.usuario?.licencias || activoSeleccionado.usuario.licencias.length === 0) ? (
+                      <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          <i className="pi pi-shield text-slate-300 text-2xl mb-2"></i>
+                          <p className="text-xs text-slate-400 font-bold uppercase">{activoSeleccionado.usuario ? 'El usuario no tiene software asignado' : 'Activo sin asignar (Disponible)'}</p>
+                      </div>
+                  ) : (
+                      <div className="space-y-2">
+                          {activoSeleccionado.usuario.licencias.map(l => (
+                              <div key={l.id} className="bg-white border border-slate-200 p-4 rounded-xl flex justify-between items-center group shadow-sm">
+                                  <div>
+                                      <p className="text-sm font-bold text-slate-800">{l.nombre || 'Sin nombre'}</p>
+                                      <p className="text-[10px] text-blue-600 font-bold uppercase">{l.categoria || 'Sin categoría'}</p>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black border uppercase tracking-wider ${l.estatus === 'Expirada' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>
+                                      {l.estatus || 'Vigente'}
+                                  </span>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+                </div>
+              )}
+
+              {pestañaActiva === 'bitacora' && (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center mb-2">
+                        <SectionHeader label="Bitácora Técnica" color="indigo" />
+                        {puedeEditar && (
+                            <button onClick={() => setMostrarModalBitacora(true)} className="bg-indigo-600 text-white text-[10px] font-bold px-3 py-1 rounded-lg shadow-sm shadow-indigo-100">+ REGISTRAR</button>
+                        )}
+                    </div>
+                    
+                    {activoSeleccionado.mantenimientos?.length === 0 ? (
+                        <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                            <i className="pi pi-calendar-times text-slate-300 text-2xl mb-2"></i>
+                            <p className="text-xs text-slate-400 font-bold">Sin mantenimientos registrados</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {activoSeleccionado.mantenimientos.map(m => (
+                                <div key={m.id} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm hover:border-indigo-300 transition-all">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${m.tipo === 'Correctivo' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>{m.tipo}</span>
+                                        <span className="text-[10px] font-bold text-slate-400">{new Date(m.fecha).toLocaleDateString()}</span>
+                                    </div>
+                                    <p className="text-xs font-bold text-slate-700 leading-relaxed mb-2">{m.descripcion}</p>
+                                    <div className="flex justify-between items-center pt-2 border-t border-slate-50">
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[8px] font-bold text-slate-500">T</div>
+                                            <span className="text-[10px] font-bold text-slate-500">{m.tecnico?.nombre_completo || 'Técnico GNN'}</span>
+                                        </div>
+                                        {puedeEditar && (
+                                          <span className="text-xs font-black text-slate-800">{formatoMoneda(m.costo)}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+              )}
+
+              {pestañaActiva === 'detalles' && (
+                <div className="space-y-4">
+                    <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
+                        <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-4">Adquisición y Garantía</p>
+                        <div className="space-y-3">
+                            <DetailItem label="N° de Parte" value={activoSeleccionado.numero_parte} />
+                            <DetailItem label="RMA / Ext." value={activoSeleccionado.rma} />
+                            <div className="border-t border-slate-50 my-2"></div>
+                            <div className="flex justify-between text-sm"><span className="text-slate-500">Proveedor:</span> <span className="font-bold text-slate-700">{activoSeleccionado.proveedor_nombre}</span></div>
+                            {puedeEditar && (
+                              <>
+                                <div className="flex justify-between text-sm"><span className="text-slate-500">Factura:</span> <span className="font-bold text-slate-700">{activoSeleccionado.factura_numero || 'N/A'}</span></div>
+                                <div className="flex justify-between text-sm"><span className="text-slate-500">Costo:</span> <span className="font-bold text-slate-700">{formatoMoneda(activoSeleccionado.costo)}</span></div>
+                              </>
+                            )}
+                            <div className="flex justify-between text-sm"><span className="text-slate-500">Compra:</span> <span className="font-bold text-slate-700">{new Date(activoSeleccionado.fecha_compra).toLocaleDateString()}</span></div>
+                        </div>
+                    </div>
+                    <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
+                        <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-4">Asignación Actual</p>
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <p className="text-slate-800 font-bold">{activoSeleccionado.asignado_a}</p>
+                                <p className="text-[11px] text-slate-500 font-medium">{activoSeleccionado.departamento}</p>
+                            </div>
+                            {puedeEditar && (
+                                <button onClick={() => setMostrarModalReasignar(true)} className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition-colors">Reasignar</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+              )}
+
+              {pestañaActiva === 'specs' && (
+                <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm grid grid-cols-2 gap-4">
+                    <div className="col-span-2 text-xs font-bold text-slate-400 uppercase tracking-wider border-b pb-2 mb-2">Ficha Técnica Especializada</div>
+                    
+                    {activoSeleccionado.categoria === 'Equipo de Cómputo' || activoSeleccionado.categoria === 'Servidor' || activoSeleccionado.categoria === 'Tablet' ? (
+                        <>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Procesador (CPU)</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.cpu || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Memoria RAM</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.ram || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Almacenamiento (SSD/HDD)</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.almacenamiento || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Tamaño Pantalla</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.pulgadas || '---'}</p></div>
+                            <div className="col-span-2 pt-2 border-t border-slate-50 mt-2"><p className="text-[10px] text-slate-500 uppercase">Número de Serie</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.serie || '---'}</p></div>
+                        </>
+                    ) : activoSeleccionado.categoria === 'Celular' ? (
+                        <>
+                            <div className="col-span-2"><p className="text-[10px] text-slate-500 uppercase">IMEI</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.imei || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Memoria RAM</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.ram || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Almacenamiento</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.almacenamiento || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Línea (Chip)</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.chip || '---'}</p></div>
+                            <div><p className="text-[10px] text-slate-500 uppercase">Número de Serie</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.serie || '---'}</p></div>
+                        </>
+                    ) : activoSeleccionado.categoria === 'Monitor' ? (
+                        <>
+                            <div className="col-span-2"><p className="text-[10px] text-slate-500 uppercase">Medida (Pulgadas)</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.pulgadas || '---'}</p></div>
+                            <div className="col-span-2"><p className="text-[10px] text-slate-500 uppercase">Número de Serie</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.serie || '---'}</p></div>
+                        </>
+                    ) : (
+                        <div className="col-span-2"><p className="text-[10px] text-slate-500 uppercase">Número de Serie</p><p className="text-sm font-bold text-slate-700">{activoSeleccionado.serie || '---'}</p></div>
+                    )}
+                </div>
+              )}
+
+              {pestañaActiva === 'historial' && (
+                <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
+                    <p className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-5">Línea de Tiempo</p>
+                    <div className="relative pl-6 border-l-2 border-slate-100 space-y-6">
+                        {activoSeleccionado.historial?.map((h, i) => (
+                            <div key={i} className="relative">
+                                <span className="absolute -left-[31px] top-1 w-3.5 h-3.5 rounded-full bg-blue-500 ring-4 ring-white shadow-sm"></span>
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{new Date(h.fecha).toLocaleDateString()}</p>
+                                <p className="text-slate-800 font-bold mt-0.5 text-sm">{h.evento}</p>
+                                <p className="text-xs text-slate-500 mt-0.5">{h.notas}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ========================================= */}
-      {/* MODAL: PAD DE FIRMA DIGITAL (CANVAS)      */}
-      {/* ========================================= */}
+      {/* MODAL ALTA / EDITAR UNIFICADO (SIDE DRAWER) */}
+      {(mostrarModalAlta || mostrarModalEditar) && (
+        <div className="fixed inset-0 z-[100] flex justify-end bg-slate-900/40 backdrop-blur-sm transition-opacity">
+            <div className="w-full md:w-[600px] bg-white border-l border-slate-200 shadow-2xl flex flex-col h-full animate-slide-in-right">
+                <div className="p-6 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-800">{mostrarModalAlta ? 'Nuevo Activo ITAM' : 'Editar Activo'}</h2>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Gestión de Ciclo de Vida</p>
+                    </div>
+                    <button onClick={() => { setMostrarModalAlta(false); setMostrarModalEditar(false); }} className="text-slate-400 hover:bg-slate-200 p-2 rounded transition">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                
+                <form id="asset-form-unificado" onSubmit={mostrarModalAlta ? handleAltaActivo : handleGuardarEdicion} className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar-light">
+                    
+                    {/* Identidad */}
+                    <div className="space-y-5">
+                        <SectionHeader label="Identidad y Clasificación" color="blue" />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Código Inventario *</label>
+                                <input required type="text" value={mostrarModalAlta ? formNuevoActivo.codigo : formEditarActivo.codigo} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, codigo: e.target.value.toUpperCase()}) : setFormEditarActivo({...formEditarActivo, codigo: e.target.value.toUpperCase()})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Tipo de Dispositivo *</label>
+                                <select required value={mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo.tipo} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, tipo: e.target.value}) : setFormEditarActivo({...formEditarActivo, tipo: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm">
+                                    {catalogoCategorias.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* ✅ NÚMERO DE PARTE (AUTORELLENADO) */}
+                        <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-xl space-y-3">
+                            <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest block">Catálogo por Número de Parte</label>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    placeholder="Ej: 20W0004XLM"
+                                    value={mostrarModalAlta ? formNuevoActivo.numero_parte : formEditarActivo.numero_parte} 
+                                    onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, numero_parte: e.target.value}) : setFormEditarActivo({...formEditarActivo, numero_parte: e.target.value})}
+                                    className="flex-1 bg-white border border-blue-200 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" 
+                                />
+                                <button 
+                                    type="button"
+                                    onClick={() => mostrarModalAlta ? handleBusquedaParte(formNuevoActivo.numero_parte, setFormNuevoActivo, formNuevoActivo) : handleBusquedaParte(formEditarActivo.numero_parte, setFormEditarActivo, formEditarActivo)}
+                                    className="bg-blue-600 text-white px-4 rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors"
+                                >
+                                    AUTORELLENAR
+                                </button>
+                            </div>
+                            <p className="text-[9px] text-slate-400 italic">Si el número de parte existe en el catálogo, se completarán las specs técnicas automáticamente.</p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Marca *</label>
+                                <select required value={mostrarModalAlta ? formNuevoActivo.marca_id : formEditarActivo.marca_id} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, marca_id: e.target.value}) : setFormEditarActivo({...formEditarActivo, marca_id: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm">
+                                    <option value="">Seleccionar...</option>
+                                    {catalogoMarcas.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Modelo Comercial *</label>
+                                <input required type="text" value={mostrarModalAlta ? formNuevoActivo.modelo : formEditarActivo.modelo} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, modelo: e.target.value}) : setFormEditarActivo({...formEditarActivo, modelo: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Número de Serie</label>
+                            <input type="text" value={mostrarModalAlta ? formNuevoActivo.serie : formEditarActivo.serie} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, serie: e.target.value}) : setFormEditarActivo({...formEditarActivo, serie: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                        </div>
+                    </div>
+
+                    {/* Ficha Técnica */}
+                    <div className="space-y-5">
+                        <SectionHeader label="Especificaciones Técnicas" color="emerald" />
+                        
+                        {(mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo?.tipo) === 'Equipo de Cómputo' || 
+                         (mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo?.tipo) === 'Servidor' || 
+                         (mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo?.tipo) === 'Tablet' ? (
+                            <>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Formato *</label>
+                                        <select required value={mostrarModalAlta ? formNuevoActivo.formato : formEditarActivo.formato} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, formato: e.target.value}) : setFormEditarActivo({...formEditarActivo, formato: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm">
+                                            <option value="">Seleccionar...</option>
+                                            <option value="Laptop">Laptop</option>
+                                            <option value="Desktop">Desktop</option>
+                                            <option value="All-in-One">All-in-One</option>
+                                            <option value="Servidor Rack">Servidor Rack</option>
+                                            <option value="Servidor Torre">Servidor Torre</option>
+                                            <option value="Tablet">Tablet</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Procesador (CPU)</label>
+                                        <input type="text" value={mostrarModalAlta ? formNuevoActivo.cpu : formEditarActivo.cpu} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, cpu: e.target.value}) : setFormEditarActivo({...formEditarActivo, cpu: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Memoria RAM</label>
+                                        <input type="text" value={mostrarModalAlta ? formNuevoActivo.ram : formEditarActivo.ram} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, ram: e.target.value}) : setFormEditarActivo({...formEditarActivo, ram: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Almacenamiento (SSD/HDD)</label>
+                                        <input type="text" value={mostrarModalAlta ? formNuevoActivo.almacenamiento : formEditarActivo.almacenamiento} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, almacenamiento: e.target.value}) : setFormEditarActivo({...formEditarActivo, almacenamiento: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Tamaño Pantalla</label>
+                                    <input type="text" value={mostrarModalAlta ? formNuevoActivo.pulgadas : formEditarActivo.pulgadas} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, pulgadas: e.target.value}) : setFormEditarActivo({...formEditarActivo, pulgadas: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-600 mb-1.5 block">RMA / Garantía Extendida</label>
+                                    <input type="text" value={mostrarModalAlta ? formNuevoActivo.rma : formEditarActivo.rma} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, rma: e.target.value}) : setFormEditarActivo({...formEditarActivo, rma: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                </div>
+                            </>
+                        ) : (mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo?.tipo) === 'Celular' ? (
+                            <>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">IMEI *</label>
+                                        <input required type="text" value={mostrarModalAlta ? formNuevoActivo.imei : formEditarActivo.imei} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, imei: e.target.value}) : setFormEditarActivo({...formEditarActivo, imei: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Memoria RAM</label>
+                                        <input type="text" value={mostrarModalAlta ? formNuevoActivo.ram : formEditarActivo.ram} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, ram: e.target.value}) : setFormEditarActivo({...formEditarActivo, ram: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Almacenamiento</label>
+                                        <input type="text" value={mostrarModalAlta ? formNuevoActivo.almacenamiento : formEditarActivo.almacenamiento} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, almacenamiento: e.target.value}) : setFormEditarActivo({...formEditarActivo, almacenamiento: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Línea (Chip / Número)</label>
+                                    <input type="text" value={mostrarModalAlta ? formNuevoActivo.chip : formEditarActivo.chip} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, chip: e.target.value}) : setFormEditarActivo({...formEditarActivo, chip: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                                </div>
+                            </>
+                        ) : (mostrarModalAlta ? formNuevoActivo.tipo : formEditarActivo?.tipo) === 'Monitor' ? (
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Tamaño Pantalla (Pulgadas)</label>
+                                <input type="text" value={mostrarModalAlta ? formNuevoActivo.pulgadas : formEditarActivo.pulgadas} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, pulgadas: e.target.value}) : setFormEditarActivo({...formEditarActivo, pulgadas: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                        ) : (
+                            <div className="py-4 text-center border-2 border-dashed border-slate-100 rounded-xl">
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sin especificaciones adicionales requeridas</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Mantenimiento */}
+                    <div className="space-y-5">
+                        <SectionHeader label="Control de Mantenimiento" color="indigo" />
+                        <div className="bg-indigo-50/50 border border-indigo-100 p-5 rounded-2xl space-y-4">
+                            <div>
+                                <label className="text-xs font-semibold text-indigo-700 mb-1.5 block">Último Mantenimiento</label>
+                                <input type="date" value={mostrarModalAlta ? formNuevoActivo.fecha_ultimo_mantenimiento : formEditarActivo.fecha_ultimo_mantenimiento} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, fecha_ultimo_mantenimiento: e.target.value}) : setFormEditarActivo({...formEditarActivo, fecha_ultimo_mantenimiento: e.target.value})} className="w-full bg-white border border-indigo-200 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-indigo-500 shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-indigo-700 mb-1.5 block">Frecuencia (Meses)</label>
+                                <input type="number" value={mostrarModalAlta ? formNuevoActivo.meses_mantenimiento : formEditarActivo.meses_mantenimiento} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, meses_mantenimiento: e.target.value}) : setFormEditarActivo({...formEditarActivo, meses_mantenimiento: e.target.value})} className="w-full bg-white border border-indigo-200 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-indigo-500 shadow-sm" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Adquisición */}
+                    <div className="space-y-5">
+                        <SectionHeader label="Datos de Compra" color="slate" />
+                        <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Proveedor</label>
+                            <select value={mostrarModalAlta ? formNuevoActivo.proveedor_id : formEditarActivo.proveedor_id} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, proveedor_id: e.target.value}) : setFormEditarActivo({...formEditarActivo, proveedor_id: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm">
+                                <option value="">Seleccionar...</option>
+                                {catalogoProveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Fecha Compra</label>
+                                <input type="date" value={mostrarModalAlta ? formNuevoActivo.fecha_compra : formEditarActivo.fecha_compra} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, fecha_compra: e.target.value}) : setFormEditarActivo({...formEditarActivo, fecha_compra: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">N° Factura</label>
+                                <input type="text" value={mostrarModalAlta ? formNuevoActivo.factura_numero : formEditarActivo.factura_numero} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, factura_numero: e.target.value}) : setFormEditarActivo({...formEditarActivo, factura_numero: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Costo (MXN)</label>
+                                <input type="number" value={mostrarModalAlta ? formNuevoActivo.costo : formEditarActivo.costo} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, costo: e.target.value}) : setFormEditarActivo({...formEditarActivo, costo: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Garantía (Años)</label>
+                                <input type="number" value={mostrarModalAlta ? formNuevoActivo.anios_garantia : formEditarActivo.anios_garantia} onChange={e => mostrarModalAlta ? setFormNuevoActivo({...formNuevoActivo, anios_garantia: e.target.value}) : setFormEditarActivo({...formEditarActivo, anios_garantia: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm" />
+                            </div>
+                        </div>
+                        {mostrarModalEditar && (
+                            <div>
+                                <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Notas de la actualización (Se guardarán en historial)</label>
+                                <textarea placeholder="Ej: Cambio de disco duro, actualización de RAM..." value={formEditarActivo.notas} onChange={e => setFormEditarActivo({...formEditarActivo, notas: e.target.value})} className="w-full bg-white border border-slate-300 text-slate-800 text-sm p-2.5 rounded outline-none focus:border-blue-500 shadow-sm min-h-[80px]" />
+                            </div>
+                        )}
+                    </div>
+                </form>
+                
+                <div className="p-6 border-t bg-slate-50 flex justify-end gap-3">
+                    <button onClick={() => { setMostrarModalAlta(false); setMostrarModalEditar(false); }} className="px-6 py-2 rounded text-sm font-medium bg-white border border-slate-300 text-slate-600 hover:text-slate-800 transition shadow-sm">Cancelar</button>
+                    <button form="asset-form-unificado" type="submit" className="px-8 py-2 rounded text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition shadow-sm shadow-blue-100">
+                        {mostrarModalAlta ? 'Crear Activo' : 'Guardar Cambios'}
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* MODAL REASIGNAR */}
+      {mostrarModalReasignar && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+                  <div className="p-6 border-b flex justify-between bg-slate-50">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Cambiar Asignación</h3>
+                      <button onClick={() => setMostrarModalReasignar(false)}>✕</button>
+                  </div>
+                  <form onSubmit={handleReasignar} className="p-8 space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Nuevo Responsable</label>
+                        <select required value={formReasignar.nuevo_asignado_id} onChange={e => setFormReasignar({...formReasignar, nuevo_asignado_id: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500">
+                            <option value="">-- Seleccionar Usuario --</option>
+                            {catalogoUsuarios.map(u => <option key={u.id} value={u.id}>{u.nombre_completo}</option>)}
+                        </select>
+                      </div>
+
+                      {/* LICENCIAS VINCULADAS */}
+                      {activoSeleccionado.licencias?.length > 0 && (
+                        <div className="space-y-3">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Licencias a conservar</label>
+                            <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar-light">
+                                {activoSeleccionado.licencias.map(lic => (
+                                    <div key={lic.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={formReasignar.licencias_ids.includes(lic.id)}
+                                                onChange={(e) => {
+                                                    const ids = e.target.checked 
+                                                        ? [...formReasignar.licencias_ids, lic.id]
+                                                        : formReasignar.licencias_ids.filter(id => id !== lic.id);
+                                                    setFormReasignar({...formReasignar, licencias_ids: ids});
+                                                }}
+                                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                            />
+                                            <span className="text-xs font-bold text-slate-700">{lic.nombre}</span>
+                                        </div>
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{lic.tipo}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-[9px] text-slate-400 italic">* Las licencias no seleccionadas serán liberadas automáticamente.</p>
+                        </div>
+                      )}
+
+                      <FormInput label="Notas de entrega" value={formReasignar.notas} onChange={v => setFormReasignar({...formReasignar, notas: v})} />
+                      
+                      <button className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                        Confirmar Reasignación
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL RESGUARDO (PDF PREVIEW) */}
+      {mostrarModalResguardo && activoSeleccionado && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 print:p-0">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col print:max-h-none print:shadow-none print:rounded-none overflow-hidden">
+                <div className="p-5 border-b flex justify-between items-center bg-slate-50 print:hidden">
+                    <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Resguardo Digital de Equipo</h3>
+                    <div className="flex gap-3">
+                        <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2"><i className="pi pi-print"></i> IMPRIMIR PDF</button>
+                        <button onClick={() => setMostrarModalResguardo(false)} className="text-slate-400 hover:text-red-500">✕</button>
+                    </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-12 bg-white text-slate-800 leading-relaxed font-serif text-sm">
+                    {/* Header Documento */}
+                    <div className="flex justify-between items-center border-b-2 border-slate-800 pb-8 mb-8">
+                        <div>
+                            <h1 className="text-2xl font-black tracking-tighter text-slate-900">GNN DESK ITAM</h1>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em]">Resguardo de Equipamiento y Herramientas</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="font-bold">GNN S.A. DE C.V.</p>
+                            <p className="text-xs text-slate-500">Sistemas y Tecnologías de Información</p>
+                        </div>
+                    </div>
+
+                    <p className="mb-6">Ciudad de México, a {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                    
+                    <p className="mb-8">Por medio de la presente, yo <span className="font-black border-b border-slate-300 px-2">{activoSeleccionado.asignado_a}</span>, identificado con el cargo de colaborador, manifiesto recibir de conformidad el equipo de cómputo y/o periféricos que se detallan a continuación, propiedad de <span className="font-black uppercase tracking-tight">GNN S.A. DE C.V.</span>, para el desempeño exclusivo de mis funciones laborales.</p>
+
+                    <table className="w-full border-2 border-slate-800 mb-8">
+                        <thead className="bg-slate-100 border-b-2 border-slate-800">
+                            <tr>
+                                <th className="p-3 text-left font-black text-[10px] uppercase">Categoría</th>
+                                <th className="p-3 text-left font-black text-[10px] uppercase">Marca / Modelo</th>
+                                <th className="p-3 text-left font-black text-[10px] uppercase">N° Serie / ID</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-300 font-sans">
+                            <tr>
+                                <td className="p-3 font-bold text-xs">{activoSeleccionado.categoria}</td>
+                                <td className="p-3 font-bold text-xs">{activoSeleccionado.marca_nombre} {activoSeleccionado.modelo}</td>
+                                <td className="p-3 font-mono text-xs">{activoSeleccionado.serie}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div className="space-y-4 mb-12">
+                        <h4 className="font-black text-xs uppercase tracking-widest">CLAUSULADO DE RESPONSABILIDAD:</h4>
+                        <p className="text-xs italic">1. El usuario se compromete a mantener el equipo en óptimas condiciones y reportar cualquier falla de inmediato al departamento de TI.</p>
+                        <p className="text-xs italic">2. Queda estrictamente prohibido el uso de los equipos para fines personales, la instalación de software no autorizado o la alteración física de los componentes.</p>
+                        <p className="text-xs italic">3. En caso de terminación laboral, el equipo deberá ser entregado en las mismas condiciones en que se recibió.</p>
+                    </div>
+
+                    <div className="flex justify-around items-end pt-20">
+                        <div className="text-center border-t-2 border-slate-300 pt-2 w-64">
+                            <p className="font-black text-xs uppercase">Dirección de Sistemas</p>
+                            <p className="text-[10px] text-slate-400">Emisor y Validador</p>
+                        </div>
+                        <div className="text-center w-64 group relative">
+                            {firmaDigital ? (
+                                <img src={firmaDigital} alt="Firma" className="h-24 mx-auto mix-blend-multiply mb-1" />
+                            ) : (
+                                <button onClick={() => setMostrarModalFirma(true)} className="mb-4 bg-slate-50 border-2 border-dashed border-slate-200 text-slate-400 px-4 py-2 rounded-xl text-[10px] font-black hover:border-blue-500 hover:text-blue-500 transition-all print:hidden">CLICK PARA FIRMAR AQUÍ</button>
+                            )}
+                            <div className="border-t-2 border-slate-800 pt-2">
+                                <p className="font-black text-xs uppercase">{activoSeleccionado.asignado_a}</p>
+                                <p className="text-[10px] text-slate-400 uppercase tracking-widest">Colaborador / Receptor</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* MODAL PAD DE FIRMA */}
       {mostrarModalFirma && (
-        <div className="fixed inset-0 z-[110] flex justify-center items-center bg-slate-950/90 backdrop-blur-sm print:hidden p-4">
-          <div className="bg-slate-900 border border-slate-700 shadow-2xl rounded-2xl w-full max-w-lg overflow-hidden animate-slide-in-right">
-            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
-              <div>
-                <h3 className="text-lg font-black text-white">Firma Electrónica</h3>
-                <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Dibuja tu firma en el recuadro blanco</p>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl overflow-hidden w-full max-lg">
+                  <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Firma Digital Autógrafa</h3>
+                      <button onClick={() => setMostrarModalFirma(false)} className="text-slate-400">✕</button>
+                  </div>
+                  <div className="p-8">
+                      <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} width={450} height={200} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl cursor-crosshair shadow-inner" />
+                      <div className="flex gap-3 mt-6">
+                          <button onClick={limpiarFirma} className="flex-1 border-2 border-slate-100 py-3 rounded-xl text-xs font-black text-slate-400 hover:bg-slate-50 transition-all">LIMPIAR PAD</button>
+                          <button onClick={guardarFirma} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl text-xs font-black shadow-lg shadow-blue-100 hover:scale-105 transition-all">GUARDAR FIRMA</button>
+                      </div>
+                  </div>
               </div>
-              <button onClick={() => setMostrarModalFirma(false)} className="text-slate-400 hover:text-white"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-            </div>
-
-            <div className="p-6 flex flex-col items-center bg-slate-800">
-              <canvas
-                ref={canvasRef}
-                width={400}
-                height={200}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseOut={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
-                className="bg-white rounded-lg border-2 border-slate-300 cursor-crosshair touch-none w-full max-w-[400px] shadow-inner"
-              />
-              <div className="w-full flex justify-end mt-3">
-                <button onClick={limpiarFirma} className="text-xs font-bold text-slate-400 hover:text-red-400 uppercase tracking-widest transition flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg> Limpiar Lienzo
-                </button>
-              </div>
-            </div>
-
-            <div className="p-5 border-t border-slate-800 bg-slate-900 flex gap-3">
-              <button onClick={() => setMostrarModalFirma(false)} className="flex-1 bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-lg font-bold text-xs uppercase tracking-widest transition">Cancelar</button>
-              <button onClick={guardarFirma} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold text-xs uppercase tracking-widest transition shadow-lg">Guardar Firma</button>
-            </div>
           </div>
-        </div>
       )}
 
-      <style dangerouslySetInnerHTML={{
-        __html: `
+      {/* MODAL BITÁCORA (MANTENIMIENTO ESTRUCTURADO) */}
+      {mostrarModalBitacora && (
+          <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+                  <div className="p-6 border-b flex justify-between bg-slate-50 items-center">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Nueva Entrada de Bitácora</h3>
+                      <button onClick={() => setMostrarModalBitacora(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
+                  </div>
+
+                  <form onSubmit={handleRegistrarBitacora} className="p-8 space-y-6">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Tipo de Servicio</label>
+                            <select value={formBitacora.tipo} onChange={e => setFormBitacora({...formBitacora, tipo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition-all">
+                                <option value="Preventivo">Preventivo</option>
+                                <option value="Correctivo">Correctivo</option>
+                                <option value="Mejora">Mejora / Upgrade</option>
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Fecha de Ejecución</label>
+                            <input type="date" value={formBitacora.fecha} onChange={e => setFormBitacora({...formBitacora, fecha: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition-all" />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Descripción Técnica</label>
+                        <textarea required placeholder="Tareas realizadas..." rows="3" value={formBitacora.descripcion} onChange={e => setFormBitacora({...formBitacora, descripcion: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition-all resize-none shadow-inner" />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Inversión / Costo (MXN)</label>
+                        <input type="number" step="0.01" value={formBitacora.costo} onChange={e => setFormBitacora({...formBitacora, costo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 transition-all shadow-inner" />
+                      </div>
+                      
+                      <div className="pt-2">
+                        <button className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                            Guardar en Historial
+                        </button>
+                        <p className="text-center text-[9px] text-slate-400 font-bold uppercase mt-4 italic tracking-wider">Actualizará automáticamente la salud del activo</p>
+                      </div>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL BAJA ESPECIALIZADA */}
+      {mostrarModalBaja && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
+                  <div className="p-6 border-b flex justify-between bg-slate-50 items-center">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Proceso de Baja de Activo</h3>
+                      <button onClick={() => setMostrarModalBaja(false)} className="text-slate-400 hover:text-slate-600 transition-colors">✕</button>
+                  </div>
+
+                  <form onSubmit={handleBaja} className="p-8 space-y-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Motivo de la Baja</label>
+                        <select value={formBaja.motivo} onChange={e => setFormBaja({...formBaja, motivo: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-red-500 transition-all">
+                            <option value="Robo">Baja por Robo</option>
+                            <option value="Venta">Baja por Venta</option>
+                            <option value="Obsolescencia">Baja por Obsolescencia</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Notas Adicionales</label>
+                        <textarea placeholder="Detalles sobre la baja..." rows="2" value={formBaja.notas} onChange={e => setFormBaja({...formBaja, notas: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-red-500 transition-all resize-none shadow-inner" />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                            {formBaja.motivo === 'Robo' ? 'Denuncia (PDF) *' : formBaja.motivo === 'Venta' ? 'Factura (PDF) *' : 'Dictamen / Otros (PDF)'}
+                        </label>
+                        <input 
+                            type="file" 
+                            accept=".pdf" 
+                            multiple
+                            onChange={(e) => setFormBaja({...formBaja, archivos: Array.from(e.target.files)})}
+                            className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-black file:bg-red-50 file:text-red-700 hover:file:bg-red-100"
+                        />
+                      </div>
+                      
+                      <div className="pt-2">
+                        <button className="w-full bg-red-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-red-100 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                            Confirmar Baja del Activo
+                        </button>
+                      </div>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL BAJA DEFINITIVA LOTE (PDF PREVIEW) */}
+      {mostrarModalBajaDefinitiva && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-4 print:p-0">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col print:max-h-none print:shadow-none print:rounded-none overflow-hidden">
+                  <div className="p-5 border-b flex justify-between items-center bg-slate-50 print:hidden">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm text-red-600 flex items-center gap-2">
+                          <i className="pi pi-exclamation-triangle"></i> Acta de Baja Definitiva de Activos
+                      </h3>
+                      <div className="flex gap-3">
+                          <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2"><i className="pi pi-print"></i> IMPRIMIR ACTA</button>
+                          <button onClick={handleBajaDefinitiva} className="bg-red-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold">APLICAR BAJA SISTEMA</button>
+                          <button onClick={() => setMostrarModalBajaDefinitiva(false)} className="text-slate-400 hover:text-red-500">✕</button>
+                      </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-12 bg-white text-slate-800 leading-relaxed font-serif text-sm">
+                      {/* Header Acta */}
+                      <div className="text-center border-b-2 border-slate-800 pb-8 mb-8">
+                          <h1 className="text-2xl font-black tracking-tighter text-slate-900 uppercase">Acta de Baja Definitiva por Obsolescencia</h1>
+                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-[0.3em] mt-1">Inventario GNN Desk ITAM</p>
+                      </div>
+
+                      <p className="mb-6">Ciudad de México, a {new Date().toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                      
+                      <p className="mb-8">Se hace constar que los siguientes activos, propiedad de <span className="font-black uppercase tracking-tight">GNN S.A. DE C.V.</span>, han cumplido su ciclo de vida útil o presentan un grado de obsolescencia técnica que no permite su continuidad operativa, por lo que se procede a su BAJA DEFINITIVA del inventario institucional.</p>
+
+                      <table className="w-full border-2 border-slate-800 mb-12">
+                          <thead className="bg-slate-100 border-b-2 border-slate-800">
+                              <tr className="text-[10px] font-black uppercase tracking-wider">
+                                  <th className="p-3 border-r-2 border-slate-800 text-left">Código / Serie</th>
+                                  <th className="p-3 border-r-2 border-slate-800 text-left">Marca / Modelo</th>
+                                  <th className="p-3 text-left">Última Asignación</th>
+                              </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-300 font-sans">
+                              {activos.filter(a => idsSeleccionados.includes(a.id)).map(a => (
+                                  <tr key={a.id} className="text-xs">
+                                      <td className="p-3 border-r border-slate-300 font-bold">{a.codigo}<br/><span className="text-[10px] text-slate-500 font-mono">{a.serie || 'S/N'}</span></td>
+                                      <td className="p-3 border-r border-slate-300">{a.marca_nombre} {a.modelo}</td>
+                                      <td className="p-3">{a.asignado_a}</td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+
+                      <div className="grid grid-cols-2 gap-20 pt-20 mt-12">
+                          <div className="text-center border-t-2 border-slate-800 pt-3">
+                              <p className="font-black text-xs uppercase">Dirección de Auditoría</p>
+                              <p className="text-[10px] text-slate-500 mt-1 italic">Nombre y Firma</p>
+                          </div>
+                          <div className="text-center border-t-2 border-slate-800 pt-3">
+                              <p className="font-black text-xs uppercase">Gestión de Medio Ambiente</p>
+                              <p className="text-[10px] text-slate-500 mt-1 italic">Nombre y Firma</p>
+                          </div>
+                          <div className="text-center border-t-2 border-slate-800 pt-3 col-span-2 w-1/2 mx-auto mt-10">
+                              <p className="font-black text-xs uppercase">Responsable de Tecnologías (GNN)</p>
+                              <p className="text-[10px] text-slate-500 mt-1 italic">Nombre y Firma</p>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL CATÁLOGOS */}
+      {mostrarModalCatalogos && (
+          <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden animate-fadeIn flex h-[600px]">
+                  {/* Sidebar Modal */}
+                  <div className="w-64 bg-slate-50 border-r border-slate-200 p-8">
+                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs mb-8">Administrar</h3>
+                      <div className="space-y-2">
+                          {[
+                            {id: 'marca', label: 'Marcas', icon: 'pi-tag'},
+                            {id: 'proveedor', label: 'Proveedores', icon: 'pi-truck'},
+                            {id: 'modelo_parte', label: 'Modelos por N° Parte', icon: 'pi-database'}
+                          ].map(t => (
+                              <button key={t.id} onClick={() => setFormNuevoCatalogo({...formNuevoCatalogo, tipo: t.id})} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${formNuevoCatalogo.tipo === t.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}>
+                                  <i className={`pi ${t.icon}`}></i> {t.label}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+
+                  {/* Content Modal */}
+                  <div className="flex-1 flex flex-col">
+                      <div className="p-6 border-b flex justify-between items-center">
+                          <h4 className="font-bold text-slate-800">Listado de {formNuevoCatalogo.tipo === 'marca' ? 'Marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'Proveedores' : 'Modelos por N° Parte'}</h4>
+                          <button onClick={() => setMostrarModalCatalogos(false)}>✕</button>
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar-light">
+                          <div className="grid grid-cols-1 gap-4">
+                              {(formNuevoCatalogo.tipo === 'marca' ? catalogoMarcas : formNuevoCatalogo.tipo === 'proveedor' ? catalogoProveedores : catalogoModelosParte).map(item => (
+                                  <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
+                                      <div>
+                                          <p className="font-black text-slate-800 text-sm">{item.numero_parte ? `${item.numero_parte} - ${item.nombre}` : item.nombre}</p>
+                                          <p className="text-[10px] text-slate-400 font-bold uppercase">{item.descripcion || item.tipo || 'Sin descripción'}</p>
+                                      </div>
+                                      {isAdmin && (
+                                          <button 
+                                              onClick={async () => {
+                                                  if(!window.confirm("¿Eliminar este elemento?")) return;
+                                                  const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
+                                                  await clienteAxios.delete(`/catalogos/${url}/${item.id}`);
+                                                  cargarCatalogos();
+                                              }}
+                                              className="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-50 p-2 rounded-lg transition-all"
+                                          >
+                                              <i className="pi pi-trash"></i>
+                                          </button>
+                                      )}
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+
+                      {/* Footer Modal (Add Form) */}
+                      {isAdmin && (
+                          <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
+                                try {
+                                    const payload = formNuevoCatalogo.tipo === 'modelo_parte' ? {
+                                        numero_parte: formNuevoCatalogo.numero_parte,
+                                        nombre: formNuevoCatalogo.nombre,
+                                        descripcion: formNuevoCatalogo.descripcion,
+                                        tipo: formNuevoCatalogo.tipo_dev,
+                                        ram: formNuevoCatalogo.ram,
+                                        cpu: formNuevoCatalogo.cpu,
+                                        almacenamiento: formNuevoCatalogo.almacenamiento,
+                                        pulgadas: formNuevoCatalogo.pulgadas,
+                                        rma: formNuevoCatalogo.rma,
+                                        especificaciones_json: formNuevoCatalogo.atributos || {}
+                                    } : {
+                                        nombre: formNuevoCatalogo.nombre,
+                                        descripcion: formNuevoCatalogo.descripcion,
+                                        rfc: formNuevoCatalogo.rfc
+                                    };
+                                    await clienteAxios.post(`/catalogos/${url}`, payload);
+                                    alert("Registrado correctamente");
+                                    cargarCatalogos();
+                                    setFormNuevoCatalogo({ ...formNuevoCatalogo, nombre: '', descripcion: '', rfc: '', numero_parte: '', ram: '', cpu: '', almacenamiento: '', pulgadas: '', rma: '', atributos: {} });
+                                } catch (err) { alert("Error al registrar"); }
+                          }} className="p-6 bg-slate-50 border-t flex flex-col gap-4">
+                              {formNuevoCatalogo.tipo === 'modelo_parte' ? (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">N° Parte</label>
+                                            <input required placeholder="Ej: 20W0004XLM" value={formNuevoCatalogo.numero_parte || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, numero_parte: e.target.value})} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
+                                        </div>
+                                        <div className="space-y-1 col-span-2">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Nombre Comercial / Modelo</label>
+                                            <input required placeholder="Ej: ThinkPad L14 Gen 2" value={formNuevoCatalogo.nombre || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, nombre: e.target.value})} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-2">
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Procesador</label>
+                                            <input placeholder="i7-1165G7" value={formNuevoCatalogo.cpu || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, cpu: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RAM</label>
+                                            <input placeholder="16GB" value={formNuevoCatalogo.ram || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, ram: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">SSD/HDD</label>
+                                            <input placeholder="512GB" value={formNuevoCatalogo.almacenamiento || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, almacenamiento: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RMA/Soporte</label>
+                                            <input placeholder="Premier" value={formNuevoCatalogo.rma || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, rma: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* ATRIBUTOS DINÁMICOS (Impresoras, Teclados, etc) */}
+                                    <div className="bg-white border border-slate-200 p-3 rounded-2xl">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Características Especiales (DPI, Toner, Resolución, etc)</p>
+                                        <div className="flex gap-2">
+                                            <input id="key-attr" placeholder="Característica" className="flex-1 bg-slate-50 border border-slate-100 p-2 rounded-lg text-[10px] outline-none" />
+                                            <input id="val-attr" placeholder="Valor" className="flex-1 bg-slate-50 border border-slate-100 p-2 rounded-lg text-[10px] outline-none" />
+                                            <button type="button" onClick={() => {
+                                                const k = document.getElementById('key-attr').value;
+                                                const v = document.getElementById('val-attr').value;
+                                                if(!k || !v) return;
+                                                setFormNuevoCatalogo({...formNuevoCatalogo, atributos: {...(formNuevoCatalogo.atributos || {}), [k]: v}});
+                                                document.getElementById('key-attr').value = '';
+                                                document.getElementById('val-attr').value = '';
+                                            }} className="bg-slate-800 text-white px-3 rounded-lg text-[10px] font-bold">AGREGAR</button>
+                                        </div>
+                                        {Object.keys(formNuevoCatalogo.atributos || {}).length > 0 && (
+                                            <div className="flex flex-wrap gap-2 mt-2">
+                                                {Object.entries(formNuevoCatalogo.atributos).map(([k, v]) => (
+                                                    <span key={k} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-2">
+                                                        {k}: {v}
+                                                        <button type="button" onClick={() => {
+                                                            const newAttr = {...formNuevoCatalogo.atributos};
+                                                            delete newAttr[k];
+                                                            setFormNuevoCatalogo({...formNuevoCatalogo, atributos: newAttr});
+                                                        }} className="text-blue-300 hover:text-blue-500">✕</button>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                              ) : (
+                                <div className="flex gap-2">
+                                    <div className="flex-1 space-y-1">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Nombre</label>
+                                        <input required placeholder="Nombre" value={formNuevoCatalogo.nombre || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, nombre: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                    {formNuevoCatalogo.tipo === 'proveedor' && (
+                                        <div className="w-40 space-y-1">
+                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RFC</label>
+                                            <input placeholder="RFC" value={formNuevoCatalogo.rfc || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, rfc: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
+                                        </div>
+                                    )}
+                                    <div className="flex-1 space-y-1">
+                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Descripción</label>
+                                        <input placeholder="Descripción" value={formNuevoCatalogo.descripcion || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, descripcion: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
+                                    </div>
+                                </div>
+                              )}
+                              <button className="w-full bg-blue-600 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 hover:scale-[1.01] active:scale-[0.99]">
+                                Guardar en {formNuevoCatalogo.tipo === 'marca' ? 'Marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'Proveedores' : 'Catálogo de Partes'}
+                              </button>
+                          </form>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* CSS ANIMATIONS & PRINT */}
+      <style>{`
         @media print {
-          body * { visibility: hidden; }
-          .print\\:bg-white { background-color: white !important; }
-          .print\\:shadow-none { box-shadow: none !important; }
-          .print\\:p-0 { padding: 0 !important; }
-          .print\\:m-0 { margin: 0 !important; }
-          .print\\:pt-0 { padding-top: 0 !important; }
-          .print\\:pb-0 { padding-bottom: 0 !important; }
-          .print\\:hidden { display: none !important; }
-          .print\\:border-none { border: none !important; }
-          .fixed.z-\\[90\\] { position: absolute; left: 0; top: 0; width: 100%; height: auto; }
-          .fixed.z-\\[90\\] * { visibility: visible; }
-          .salto-pagina { page-break-before: always !important; break-before: page !important; }
+            body * { visibility: hidden; }
+            .fixed.z-\\[120\\] { position: absolute; left: 0; top: 0; width: 100%; height: auto; background: white !important; z-index: 9999; }
+            .fixed.z-\\[120\\] * { visibility: visible; }
+            .fixed.z-\\[120\\] .print\\:hidden { display: none !important; }
         }
-        @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
-        .animate-slide-in-right { animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-      `}} />
+        @keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .animate-slide-in-right { animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+        .animate-spin-slow { animation: spin 8s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 };

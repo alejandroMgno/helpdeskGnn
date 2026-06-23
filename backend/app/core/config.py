@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./zenit_desk.db")
     SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", "sqlite:///./zenit_desk.db")
 
+    # Defaults SMTP (Si no hay en BD)
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_TLS: bool = os.getenv("SMTP_TLS", "True").lower() == "true"
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    EMAILS_FROM_EMAIL: str = os.getenv("EMAILS_FROM_EMAIL", "alertas@tuempresa.com")
+    EMAILS_FROM_NAME: str = os.getenv("EMAILS_FROM_NAME", "GNN SAM Alerts")
+
     class Config:
         case_sensitive = True
 

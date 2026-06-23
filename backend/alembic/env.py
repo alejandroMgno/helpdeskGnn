@@ -10,9 +10,15 @@ from app.core.config import settings
 from app.db.base_class import Base
 
 # Modelos (DEBEN estar importados aquí para que Alembic detecte las tablas)
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, HorarioLaboral
 from app.models.activo import Activo
 from app.models.ticket import Ticket 
+from app.models.licencia import Licencia
+from app.models.articulo import Articulo
+from app.models.catalogos import Marca, Proveedor, Departamento, Puesto, Zona, SLAConfig, CategoriaActivo, CentroCosto, ModeloParte
+from app.models.seguimiento import HistorialStatusTecnico, TicketTimeline
+from app.models.config import ConfiguracionSMTP
+from app.models.auditoria import RegistroAuditoria
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -35,6 +41,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=True
     )
 
     with context.begin_transaction():
@@ -56,7 +63,8 @@ def run_migrations_online() -> None:
     with connectable.connect() as connection:
         context.configure(
             connection=connection, 
-            target_metadata=target_metadata
+            target_metadata=target_metadata,
+            render_as_batch=True
         )
 
         with context.begin_transaction():
