@@ -1,9 +1,19 @@
-# backend/app/schemas/activo.py
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 from app.schemas.usuario import UsuarioResponse
 from app.schemas.catalogos import MarcaResponse, ProveedorResponse, ModeloParteResponse
+
+class DocumentoResponse(BaseModel):
+    id: int
+    activo_id: int
+    nombre_archivo: str
+    ruta_archivo: str
+    tipo_documento: Optional[str] = None
+    fecha_carga: datetime
+
+    class Config:
+        from_attributes = True
 
 class ActivoBase(BaseModel):
     codigo: str
@@ -31,10 +41,9 @@ class ActivoBase(BaseModel):
     formato: Optional[str] = None
     rma: Optional[str] = None
 
-    # Datos Financieros y Documentación
+    # Datos Financieros
     costo: float = 0.0
     factura_numero: Optional[str] = None
-    documentos: Optional[List[str]] = []
     fecha_compra: Optional[datetime] = None
     anios_garantia: int = 1
 
@@ -54,30 +63,11 @@ class ActivoCreate(ActivoBase):
 
 class ActivoUpdate(BaseModel):
     nombre: Optional[str] = None
-    numero_parte: Optional[str] = None
-    modelo_parte_id: Optional[int] = None
-    modelo: Optional[str] = None
-    marca_texto: Optional[str] = None
-    marca_id: Optional[int] = None
-    proveedor_id: Optional[int] = None
-    estatus: Optional[str] = None
     usuario_id: Optional[int] = None
-    documentos: Optional[List[str]] = None
-    fecha_ultimo_mantenimiento: Optional[datetime] = None
-    meses_mantenimiento: Optional[int] = None
-    fecha_proximo_mantenimiento: Optional[datetime] = None
-    costo: Optional[float] = None
-    factura_numero: Optional[str] = None
-    imei: Optional[str] = None
-    chip: Optional[str] = None
-    serie: Optional[str] = None
-    ram: Optional[str] = None
-    cpu: Optional[str] = None
-    pulgadas: Optional[str] = None
-    almacenamiento: Optional[str] = None
-    formato: Optional[str] = None
-    rma: Optional[str] = None
+    estatus: Optional[str] = None
+    # ... otros campos ...
     notas: Optional[str] = None # Para el historial
+    firma_base64: Optional[str] = None # NUEVO: Firma para resguardo
 
 class MantenimientoBase(BaseModel):
     tipo: str
@@ -115,6 +105,7 @@ class ActivoResponse(ActivoBase):
     proveedor: Optional[ProveedorResponse] = None
     modelo_parte: Optional[ModeloParteResponse] = None
     licencias: List[LicenciaEnActivo] = []
+    documentos_relacionados: List[DocumentoResponse] = []
 
     class Config:
         from_attributes = True

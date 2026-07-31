@@ -21,7 +21,7 @@ class TicketBase(BaseModel):
     activo_id: Optional[int] = None
 
 class TicketCreate(TicketBase):
-    pass
+    solicitante_id: Optional[int] = None
 
 class TicketUpdate(BaseModel):
     estatus: Optional[EstatusTicket] = None

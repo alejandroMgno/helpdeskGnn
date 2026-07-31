@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Body, WebSocket, WebSocketDisconnect, BackgroundTasks, File, UploadFile, Form
+import shutil
+import os
 from sqlalchemy.orm import Session
 from sqlalchemy import String
 from pydantic import BaseModel
@@ -12,6 +14,10 @@ from app.models.usuario import RolUsuario
 from app.services.sla_engine import calcular_vencimiento_sla, asignar_tecnico_inteligente, pausar_sla, reanudar_sla
 from app.services.websocket_manager import manager
 from app.services.email_service import notificar_ticket_nuevo, notificar_ticket_reasignado, notificar_ticket_cerrado
+from app.services.image_processor import compress_image
+
+def is_image(filename):
+    return filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'))
 
 router = APIRouter()
 
@@ -26,14 +32,18 @@ def procesar_sla(ticket: Ticket, nuevo_estatus: EstatusTicket, db: Session, user
             ticket.fecha_primera_respuesta = ahora
             ticket.fecha_vencimiento_sla = calcular_vencimiento_sla(ticket.prioridad, start_date=ahora)
             
+            # 🧠 Cambiar a En Progreso automáticamente si es la primera respuesta del técnico
+            if user.rol == RolUsuario.Tecnico and ticket.estatus == EstatusTicket.Abierto:
+                ticket.estatus = EstatusTicket.En_Progreso
+            
             # Log de primera respuesta
             log = Comentario(
                 ticket_id=ticket.id,
                 autor_id=user.id,
-                texto=f"SISTEMA: Primera respuesta registrada. SLA inicia ahora.",
+                texto=f"SISTEMA: Primera respuesta registrada. SLA inicia ahora. Estatus cambiado a En Progreso.",
             )
             db.add(log)
-
+    
     # 2. Lógica de Pausa (Entrar en espera)
     estatus_espera = [
         EstatusTicket.En_Espera_Pieza,
@@ -103,6 +113,8 @@ async def procesar_escalacion(ticket: Ticket, estatus_anterior: EstatusTicket, n
                 ModelUsuario.especialidad == specialty,
                 ModelUsuario.is_active == True
             ).first()
+            
+            print(f"DEBUG: Escalando a {specialty}. Specialist found: {specialist.id if specialist else 'None'}")
             
             # Crear ticket hijo
             escalation_ticket = Ticket(
@@ -356,32 +368,64 @@ async def actualizar_estatus(
 @router.post("/{ticket_id}/comentarios")
 async def agregar_comentario(
     ticket_id: int, 
-    data: ComentarioCreate, # Usamos el esquema de Pydantic
+    texto: Optional[str] = Form(None),
+    adjunto: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db), 
     current_user: Usuario = Depends(get_current_active_user)
 ):
-    # Verificamos que no sea vacío o solo espacios
-    if not data.texto or not data.texto.strip():
-        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío")
+    # Verificamos que haya texto O un adjunto
+    if (not texto or not texto.strip()) and not adjunto:
+        raise HTTPException(status_code=400, detail="El comentario debe tener texto o un adjunto")
 
     # Verificamos que el ticket exista primero
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
 
+    adjunto_url = None
+    adjunto_nombre = None
+    if adjunto:
+        upload_dir = "uploads/comentarios"
+        os.makedirs(upload_dir, exist_ok=True)
+        filename = f"{datetime.utcnow().timestamp()}_{adjunto.filename}"
+        file_path = os.path.join(upload_dir, filename)
+        
+        file_content = adjunto.file.read()
+        if is_image(adjunto.filename):
+            compress_image(file_content, file_path)
+        else:
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+        
+        adjunto_url = file_path
+        adjunto_nombre = adjunto.filename
+
+    estatus_antes = ticket.estatus
     # Si el comentario es de un técnico, podría ser la primera respuesta
     procesar_sla(ticket, ticket.estatus, db, current_user)
 
     nuevo = Comentario(
         ticket_id=ticket_id, 
         autor_id=current_user.id, 
-        texto=data.texto,
+        texto=texto or "", # Guardar cadena vacía si no hay texto
+        adjunto_url=adjunto_url,
+        adjunto_nombre=adjunto_nombre
     )
     db.add(nuevo)
     db.commit()
     db.refresh(nuevo)
     
     # NOTIFICACIÓN REAL-TIME
+    if ticket.estatus != estatus_antes:
+        await manager.broadcast_to_ticket(ticket_id, {
+            "type": "ticket_actualizado",
+            "data": {
+                "id": ticket.id,
+                "estatus": ticket.estatus.value,
+                "tecnico_asignado_id": ticket.tecnico_asignado_id
+            }
+        })
+    
     await manager.broadcast_to_ticket(ticket_id, {
         "type": "comentario_nuevo",
         "data": {
@@ -389,7 +433,9 @@ async def agregar_comentario(
             "autor": current_user.nombre_completo,
             "rol": current_user.rol.value,
             "texto": nuevo.texto,
-            "fecha": nuevo.fecha.strftime("%d %b, %I:%M %p")
+            "fecha": nuevo.fecha.strftime("%d %b, %I:%M %p"),
+            "adjunto_url": nuevo.adjunto_url,
+            "adjunto_nombre": nuevo.adjunto_nombre
         }
     })
     
@@ -401,9 +447,13 @@ def obtener_ticket(ticket_id: int, db: Session = Depends(get_db), current_user: 
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
     
+    # 🧠 Intentar activar SLA automáticamente si aplica
+    activar_sla_automaticamente(ticket, db)
+
     # Inyectar indicadores de SLA
     inyectar_indicadores_sla(ticket, db)
     return ticket
+
 
 @router.get("/stats/counts")
 def obtener_conteos(
@@ -625,54 +675,115 @@ def inyectar_indicadores_sla(ticket: Ticket, db: Session):
         ticket.sla_estado_visual = "verde"
 
 @router.post("/", response_model=TicketResponse)
-def crear_ticket(ticket: TicketCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_active_user)):
-    
+def crear_ticket(
+    titulo: str = Form(...),
+    descripcion: str = Form(...),
+    prioridad: PrioridadTicket = Form(...),
+    departamento: Optional[str] = Form("Soporte N1"),
+    activo_id: Optional[int] = Form(None),
+    solicitante_id: Optional[int] = Form(None),
+    adjunto: Optional[UploadFile] = File(None),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user)
+):
     tecnico_asignado_id = None
-    
+
+    # 🧠 LÓGICA DE SOLICITANTE (Admin/Tecnico pueden asignar)
+    solicitante_id_final = current_user.id
+    if (current_user.rol == RolUsuario.Admin or current_user.rol == RolUsuario.Tecnico) and solicitante_id:
+        solicitante_id_final = solicitante_id
+
     # 🧠 LÓGICA DE ENRUTAMIENTO AUTOMÁTICO
-    if current_user.tecnico_principal_id:
-        # 1. Buscamos al técnico principal
-        tec_principal = db.query(Usuario).filter(Usuario.id == current_user.tecnico_principal_id).first()
-        
+    # Usamos el solicitante_id para buscar al técnico del solicitante
+    solicitante = db.query(Usuario).filter(Usuario.id == solicitante_id_final).first()
+    
+    if solicitante and solicitante.zona and solicitante.departamento:
+        from app.core.tecnicos_config import obtener_tecnicos
+        from app.models.catalogos import Zona, Departamento
+
+        zona_obj = db.query(Zona).filter(Zona.nombre == solicitante.zona).first()
+        dept_obj = db.query(Departamento).filter(Departamento.nombre == solicitante.departamento).first()
+
+        if zona_obj and dept_obj:
+            from app.models.catalogos import AsignacionTecnica
+            asignacion = db.query(AsignacionTecnica).filter(
+                AsignacionTecnica.zona_id == zona_obj.id,
+                AsignacionTecnica.departamento_id == dept_obj.id
+            ).first()
+
+            if asignacion:
+                # 1. Intentar asignar al principal
+                tec_principal = db.query(Usuario).filter(Usuario.id == asignacion.tecnico_principal_id).first()
+                if tec_principal and not tec_principal.ausente:
+                    tecnico_asignado_id = tec_principal.id
+                elif asignacion.tecnico_secundario_id:
+                    # 2. Intentar asignar al secundario
+                    tec_secundario = db.query(Usuario).filter(Usuario.id == asignacion.tecnico_secundario_id).first()
+                    if tec_secundario and not tec_secundario.ausente:
+                        tecnico_asignado_id = tec_secundario.id
+
+    # Fallback si no hubo asignación automática
+    if not tecnico_asignado_id and solicitante and solicitante.tecnico_principal_id:
+        # ... (Mantener lógica de fallback anterior por compatibilidad)
+        tec_principal = db.query(Usuario).filter(Usuario.id == solicitante.tecnico_principal_id).first()
         if tec_principal and not tec_principal.ausente:
-            # Si existe y NO está de vacaciones, se lo asignamos
             tecnico_asignado_id = tec_principal.id
-        elif current_user.tecnico_secundario_id:
-            # 2. Si el principal está ausente, buscamos al secundario
-            tec_secundario = db.query(Usuario).filter(Usuario.id == current_user.tecnico_secundario_id).first()
-            
+        elif solicitante.tecnico_secundario_id:
+            tec_secundario = db.query(Usuario).filter(Usuario.id == solicitante.tecnico_secundario_id).first()
             if tec_secundario and not tec_secundario.ausente:
                 tecnico_asignado_id = tec_secundario.id
 
+    adjunto_url = None
+    adjunto_nombre = None
+    if adjunto:
+        upload_dir = "uploads/tickets"
+        os.makedirs(upload_dir, exist_ok=True)
+        filename = f"{datetime.utcnow().timestamp()}_{adjunto.filename}"
+        file_path = os.path.join(upload_dir, filename)
+        
+        file_content = adjunto.file.read()
+        if is_image(adjunto.filename):
+            compress_image(file_content, file_path)
+        else:
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+        
+        adjunto_url = file_path
+        adjunto_nombre = adjunto.filename
+
     # Creamos el ticket con el técnico que ganó la validación (o None si ambos están ausentes)
     nuevo_ticket = Ticket(
-        titulo=ticket.titulo,
-        descripcion=ticket.descripcion,
-        prioridad=PrioridadTicket.Media,
-        departamento=ticket.departamento,
-        solicitante_id=current_user.id,
+        titulo=titulo,
+        descripcion=descripcion,
+        prioridad=prioridad, # Usar prioridad del formulario
+        departamento=departamento,
+        solicitante_id=solicitante_id_final,
         tecnico_asignado_id=tecnico_asignado_id, # Asignación automática
-        activo_id=str(ticket.activo_id) if ticket.activo_id else None,
+        activo_id=str(activo_id) if activo_id else None,
+        adjunto_url=adjunto_url,
+        adjunto_nombre=adjunto_nombre,
         fecha_vencimiento_sla=None # Se calculará en la primera respuesta
     )
-    
+
     db.add(nuevo_ticket)
     db.commit()
     db.refresh(nuevo_ticket)
 
     # Notificar por email
+    # Usamos current_user (quien creó) para notificar
     background_tasks.add_task(notificar_ticket_nuevo, current_user.email, nuevo_ticket.id, nuevo_ticket.titulo, current_user.nombre_completo)
     if tecnico_asignado_id:
         tec = db.query(Usuario).filter(Usuario.id == tecnico_asignado_id).first()
         if tec:
             background_tasks.add_task(notificar_ticket_nuevo, tec.email, nuevo_ticket.id, nuevo_ticket.titulo, current_user.nombre_completo, tec.nombre_completo)
-    
+
     # NOTIFICACIÓN REAL-TIME (Vía Background Task para evitar bloquear el loop)
     background_tasks.add_task(manager.broadcast_global, {
         "type": "update_dashboard",
         "message": f"Nuevo ticket creado: {nuevo_ticket.titulo}"
     })
-    
+
     return nuevo_ticket
 
 @router.post("/{ticket_id}/calificar")

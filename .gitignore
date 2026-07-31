@@ -1,0 +1,12 @@
+# Git ignore
+.env
+venv/
+__pycache__/
+.pytest_cache/
+*.db
+*.sqlite
+*.pyc
+.git/
+.vscode/
+.idea/
+backend/uploads/

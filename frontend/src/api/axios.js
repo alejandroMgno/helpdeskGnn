@@ -2,6 +2,7 @@ import axios from 'axios';
 
 // Usamos variables de entorno para producción, si no existe, usamos localhost por defecto.
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+// const API_URL = import.meta.env.VITE_API_URL || 'https://01vqbx8b-8000.usw3.devtunnels.ms/api/v1';
 
 const clienteAxios = axios.create({
     baseURL: API_URL,

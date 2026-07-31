@@ -265,6 +265,8 @@ def restaurar_licencia(licencia_id: int, db: Session = Depends(get_db), current_
     db.refresh(licencia)
     return licencia
 
+from app.models.documento_licencia import DocumentoLicencia
+
 @router.post("/{licencia_id}/documentos")
 def subir_documentos_licencia(
     licencia_id: int, 
@@ -276,14 +278,19 @@ def subir_documentos_licencia(
     if not licencia:
         raise HTTPException(status_code=404, detail="No encontrada")
 
-    docs = list(licencia.documentos) if licencia.documentos else []
     for file in files:
         file_path = f"uploads/licencias/lic_{licencia_id}_{file.filename}"
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        docs.append(file_path)
-
-    licencia.documentos = docs
+        
+        # Crear nueva entrada en la BD
+        nuevo_doc = DocumentoLicencia(
+            licencia_id=licencia_id,
+            nombre_archivo=file.filename,
+            ruta_archivo=file_path,
+            tipo_documento="Factura/Contrato"
+        )
+        db.add(nuevo_doc)
     
     hist = list(licencia.historial) if licencia.historial else []
     hist.append({
@@ -297,7 +304,10 @@ def subir_documentos_licencia(
     flag_modified(licencia, "historial")
     
     db.commit()
-    return {"status": "ok", "documentos": licencia.documentos}
+    db.refresh(licencia)
+    
+    return {"status": "ok", "documentos": [d.nombre_archivo for d in licencia.documentos_relacionados]}
+
 
 @router.post("/{licencia_id}/vincular-usuario/{usuario_id}", response_model=LicenciaResponse)
 def vincular_usuario(licencia_id: int, usuario_id: int, db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_active_user)):

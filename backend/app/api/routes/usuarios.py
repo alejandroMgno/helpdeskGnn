@@ -264,3 +264,42 @@ async def update_usuario(
     await manager.broadcast_global({"type": "update_dashboard"})
         
     return usuario
+
+@router.post("/{usuario_id}/resend-verification")
+async def resend_verification_email(
+    usuario_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user)
+):
+    """Reenviar correo de verificación de usuario."""
+    if current_user.rol != RolUsuario.Admin:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden realizar esta acción.")
+
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    if usuario.is_email_verified:
+        raise HTTPException(status_code=400, detail="El usuario ya ha verificado su correo.")
+
+    # Generar nuevo token si no existe
+    if not usuario.email_verification_token:
+        usuario.email_verification_token = secrets.token_urlsafe(32)
+        db.commit()
+
+    # Enviar correo de verificación
+    verification_link = f"{settings.FRONTEND_URL}/verify-email/{usuario.email_verification_token}"
+    html = f"""
+    <html>
+        <body>
+            <h2>Bienvenido a {settings.PROJECT_NAME}</h2>
+            <p>Por favor, haz clic en el siguiente enlace para activar tu cuenta:</p>
+            <a href="{verification_link}">{verification_link}</a>
+        </body>
+    </html>
+    """
+    background_tasks.add_task(enviar_email, usuario.email, "Activa tu cuenta", html)
+    
+    return {"message": "Correo de verificación enviado"}
+

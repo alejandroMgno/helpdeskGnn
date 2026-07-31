@@ -57,11 +57,13 @@ class Activo(Base):
     almacenamiento = Column(String(50), nullable=True)
     formato = Column(String(50), nullable=True) # Laptop, Desktop, Tablet, etc.
     rma = Column(String(100), nullable=True)
+    
+    # Firma persistente
+    firma_resguardo = Column(String, nullable=True)
 
     # Datos Financieros y Documentación
     costo = Column(Float, default=0.0)
     factura_numero = Column(String(100), nullable=True)
-    documentos = Column(JSON, default=list)
     fecha_compra = Column(DateTime, default=datetime.utcnow)
     anios_garantia = Column(Integer, default=1)
 
@@ -76,6 +78,7 @@ class Activo(Base):
 
     # A quién pertenece este equipo
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    usuario_historial = Column(JSON, default=list) # Lista de IDs de los últimos 5 usuarios
 
     # Relaciones ORM
     usuario = relationship("Usuario", backref="activos_asignados")
@@ -84,6 +87,7 @@ class Activo(Base):
     modelo_parte = relationship("ModeloParte")
     mantenimientos = relationship("Mantenimiento", back_populates="activo", cascade="all, delete-orphan")
     licencias = relationship("Licencia", secondary=activo_licencia, back_populates="activos")
+    documentos_relacionados = relationship("DocumentoActivo", back_populates="activo", cascade="all, delete-orphan")
 
 class Mantenimiento(Base):
     __tablename__ = "mantenimientos"

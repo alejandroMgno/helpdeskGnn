@@ -1,7 +1,18 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import date
+from datetime import date, datetime
 from app.schemas.catalogos import ProveedorResponse
+
+class DocumentoLicenciaResponse(BaseModel):
+    id: int
+    licencia_id: int
+    nombre_archivo: str
+    ruta_archivo: str
+    tipo_documento: Optional[str] = None
+    fecha_carga: datetime
+
+    class Config:
+        from_attributes = True
 
 class LicenciaBase(BaseModel):
     nombre: str
@@ -29,7 +40,6 @@ class LicenciaUpdate(BaseModel):
     llave: Optional[str] = None
     asientos_asignados: Optional[List[str]] = None
     historial: Optional[List[Dict[str, Any]]] = None
-    documentos: Optional[List[str]] = None
     estatus: Optional[str] = None
 
 class ActivoEnLicencia(BaseModel):
@@ -55,7 +65,7 @@ class LicenciaResponse(LicenciaBase):
     asientos_usados: int = 0
     asientos_disponibles: int = 0
     historial: List[Dict[str, Any]] = []
-    documentos: List[str] = []
+    documentos_relacionados: List[DocumentoLicenciaResponse] = []
     is_deleted: bool = False
     estatus: str
     proveedor: Optional[ProveedorResponse] = None

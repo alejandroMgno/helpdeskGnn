@@ -56,6 +56,10 @@ class Ticket(Base):
     # Escalación de tickets
     parent_ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
     is_escalation = Column(Boolean, default=False)
+    
+    # Evidence for ticket
+    adjunto_url = Column(String(500), nullable=True)
+    adjunto_nombre = Column(String(200), nullable=True)
 
     solicitante = relationship("Usuario", foreign_keys=[solicitante_id])
     tecnico = relationship("Usuario", foreign_keys=[tecnico_asignado_id])
@@ -69,6 +73,10 @@ class Comentario(Base):
     autor_id = Column(Integer, ForeignKey("usuarios.id"))
     texto = Column(Text, nullable=False)
     fecha = Column(DateTime, default=datetime.utcnow)
+    
+    # Evidence for chat
+    adjunto_url = Column(String(500), nullable=True)
+    adjunto_nombre = Column(String(200), nullable=True)
     
     ticket = relationship("Ticket", back_populates="comentarios")
     autor = relationship("Usuario")

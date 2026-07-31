@@ -2,6 +2,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Pagination from '../components/Pagination';
 import clienteAxios from '../api/axios';
+import ModalBitacora from '../components/inventario/ModalBitacora';
+import ModalBaja from '../components/inventario/ModalBaja';
+import ModalReasignar from '../components/inventario/ModalReasignar';
+import ModalCatalogos from '../components/inventario/ModalCatalogos';
 
 // --- COMPONENTES AUXILIARES (Definidos arriba para evitar ReferenceErrors) ---
 const formatoMoneda = (m) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(m || 0);
@@ -90,7 +94,7 @@ const Inventario = ({ user, token }) => {
   });
   const [formEditarActivo, setFormEditarActivo] = useState(null);
   const [formReasignar, setFormReasignar] = useState({ nuevo_asignado_id: '', notas: '', licencias_ids: [] });
-  const [formNuevoCatalogo, setFormNuevoCatalogo] = useState({ tipo: 'marca', nombre: '', descripcion: '', rfc: '' });
+  const [formNuevoCatalogo, setFormNuevoCatalogo] = useState({ tipo: 'marca', nombre: '', descripcion: '', rfc: '', numero_parte: '', tipo_dev: '', ram: '', cpu: '', almacenamiento: '', pulgadas: '', rma: '', atributos: {} });
 
   const isAdmin = user?.rol === 'Admin';
   const isTecnico = user?.rol === 'Tecnico';
@@ -270,14 +274,15 @@ const Inventario = ({ user, token }) => {
     } catch (error) { alert("Error al registrar."); }
   };
 
-  const handleReasignar = async (e) => {
+  const handleReasignar = async (e, firma) => {
     e.preventDefault();
     try {
       await clienteAxios.put(`/activos/${activoSeleccionado.id}`, {
         usuario_id: parseInt(formReasignar.nuevo_asignado_id),
         estatus: 'Asignado',
         licencias_ids: formReasignar.licencias_ids,
-        notas: formReasignar.notas
+        notas: formReasignar.notas,
+        firma_base64: firma
       });
       fetchActivos();
       setMostrarModalReasignar(false);
@@ -414,7 +419,16 @@ const Inventario = ({ user, token }) => {
   const draw = (e) => { if (!isDrawing) return; const ctx = canvasRef.current.getContext('2d'); const rect = canvasRef.current.getBoundingClientRect(); ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top); ctx.stroke(); };
   const stopDrawing = () => setIsDrawing(false);
   const limpiarFirma = () => canvasRef.current.getContext('2d').clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-  const guardarFirma = () => { setFirmaDigital(canvasRef.current.toDataURL("image/png")); setMostrarModalFirma(false); };
+  const guardarFirma = async () => {
+    if (!canvasRef.current) return;
+    
+    // Convert canvas to base64
+    const firmaBase64 = canvasRef.current.toDataURL("image/png");
+    setFirmaDigital(firmaBase64);
+    setMostrarModalFirma(false);
+    
+    alert("Firma capturada. Ahora puedes proceder a guardar el resguardo.");
+  };
 
   // --- HELPERS UI ---
   const getEstatusBadge = (s) => {
@@ -648,26 +662,88 @@ const Inventario = ({ user, token }) => {
                         <i className="pi pi-refresh text-slate-500 text-sm"></i> STOCK
                     </button>
                     <button onClick={() => setMostrarModalResguardo(true)} 
-                        title="Generar Resguardo PDF"
-                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-emerald-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
-                        <i className="pi pi-file-pdf text-emerald-500 text-sm"></i> PDF
+                        title="Generar Resguardo"
+                        disabled={activoSeleccionado.estatus !== 'Asignado' || (activoSeleccionado.firma_resguardo !== null && activoSeleccionado.firma_resguardo !== undefined && activoSeleccionado.firma_resguardo !== '')}
+                        className={`flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm ${activoSeleccionado.estatus !== 'Asignado' || (activoSeleccionado.firma_resguardo !== null && activoSeleccionado.firma_resguardo !== undefined && activoSeleccionado.firma_resguardo !== '') ? 'opacity-50 cursor-not-allowed bg-slate-100' : 'hover:bg-emerald-50 text-slate-600'}`}>
+                        <i className={`pi pi-file-pdf text-sm ${activoSeleccionado.estatus !== 'Asignado' || (activoSeleccionado.firma_resguardo !== null && activoSeleccionado.firma_resguardo !== undefined && activoSeleccionado.firma_resguardo !== '') ? 'text-slate-400' : 'text-emerald-500'}`}></i> Resguardo
                     </button>
                     <button onClick={() => handleSoftDelete(activoSeleccionado)} 
                         title="Dar de Baja"
                         className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-red-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
                         <i className="pi pi-trash text-red-500 text-sm"></i> BAJA
                     </button>
+                    <button onClick={() => setPestañaActiva('documentos')} 
+                        title="Gestionar Documentos"
+                        className="flex flex-col items-center justify-center gap-1 bg-white border border-slate-200 hover:bg-blue-50 text-slate-600 p-2 rounded-lg text-[9px] font-bold transition-all shadow-sm">
+                        <i className="pi pi-file text-blue-500 text-sm"></i> DOCS
+                    </button>
                 </div>
               )}
 
               {/* TABS SIMPLIFICADOS */}
               <div className="flex gap-4 border-b border-slate-100">
-                {['detalles', 'specs', 'licencias', 'historial', 'bitacora'].map(t => (
+                {['detalles', 'specs', 'licencias', 'historial', 'bitacora', 'documentos'].map(t => (
                     <button key={t} onClick={() => setPestañaActiva(t)} className={`pb-2 text-[10px] font-black uppercase tracking-wider transition-colors border-b-2 ${pestañaActiva === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         {t === 'bitacora' ? 'Bitácora' : t === 'specs' ? 'Ficha' : t === 'licencias' ? 'Licencias' : t}
                     </button>
                 ))}
               </div>
+
+              {pestañaActiva === 'documentos' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Documentos del Activo</p>
+                      {puedeEditar && (
+                        <label className="bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-lg shadow-sm shadow-blue-100 cursor-pointer hover:bg-blue-700">
+                          + ADJUNTAR
+                          <input type="file" multiple className="hidden" onChange={async (e) => {
+                              const files = Array.from(e.target.files);
+                              const formData = new FormData();
+                              files.forEach(f => formData.append('files', f));
+                              try {
+                                  await clienteAxios.post(`/activos/${activoSeleccionado.id}/documentos`, formData, { headers: { 'Content-Type': 'multipart/form-data' }});
+                                  alert("Documentos subidos");
+                                  fetchActivos(activoSeleccionado.id);
+                              } catch (err) { alert("Error al subir"); }
+                          }} />
+                        </label>
+                      )}
+                  </div>
+                  {(!activoSeleccionado.documentos_relacionados || activoSeleccionado.documentos_relacionados.length === 0) ? (
+                      <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          <i className="pi pi-file-o text-slate-300 text-2xl mb-2"></i>
+                          <p className="text-xs text-slate-400 font-bold uppercase">No hay documentos adjuntos</p>
+                      </div>
+                  ) : (
+                      <div className="space-y-2">
+                          {activoSeleccionado.documentos_relacionados.map((doc, idx) => (
+                              <div key={idx} className="bg-white border border-slate-200 p-4 rounded-xl flex justify-between items-center group shadow-sm">
+                                  <div className="flex items-center gap-3">
+                                      <i className="pi pi-file-pdf text-red-500 text-lg"></i>
+                                      <div>
+                                          <p className="text-sm font-bold text-slate-800">{doc.nombre_archivo}</p>
+                                          <p className="text-[10px] text-slate-500 font-bold uppercase">{doc.tipo_documento}</p>
+                                      </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <a href={clienteAxios.defaults.baseURL.replace(/\/api\/v1$/, '') + '/' + doc.ruta_archivo.replace(/\\/g, '/').replace(/^.*uploads\//, 'uploads/')} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-blue-600 hover:underline">ABRIR</a>
+                                      {puedeEditar && (
+                                        <button onClick={async () => {
+                                            if(!window.confirm("¿Estás seguro de eliminar este documento?")) return;
+                                            try {
+                                                await clienteAxios.delete(`/activos/${activoSeleccionado.id}/documentos/${doc.id}`);
+                                                alert("Documento eliminado");
+                                                fetchActivos(activoSeleccionado.id);
+                                            } catch (err) { alert("Error al eliminar"); }
+                                        }} className="text-[10px] font-bold text-red-600 hover:underline">ELIMINAR</button>
+                                      )}
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+                </div>
+              )}
 
               {pestañaActiva === 'licencias' && (
                 <div className="space-y-4">
@@ -1038,60 +1114,15 @@ const Inventario = ({ user, token }) => {
       )}
 
       {/* MODAL REASIGNAR */}
-      {mostrarModalReasignar && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden animate-fadeIn">
-                  <div className="p-6 border-b flex justify-between bg-slate-50">
-                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-sm">Cambiar Asignación</h3>
-                      <button onClick={() => setMostrarModalReasignar(false)}>✕</button>
-                  </div>
-                  <form onSubmit={handleReasignar} className="p-8 space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Nuevo Responsable</label>
-                        <select required value={formReasignar.nuevo_asignado_id} onChange={e => setFormReasignar({...formReasignar, nuevo_asignado_id: e.target.value})} className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500">
-                            <option value="">-- Seleccionar Usuario --</option>
-                            {catalogoUsuarios.map(u => <option key={u.id} value={u.id}>{u.nombre_completo}</option>)}
-                        </select>
-                      </div>
-
-                      {/* LICENCIAS VINCULADAS */}
-                      {activoSeleccionado.licencias?.length > 0 && (
-                        <div className="space-y-3">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Licencias a conservar</label>
-                            <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar-light">
-                                {activoSeleccionado.licencias.map(lic => (
-                                    <div key={lic.id} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-xl">
-                                        <div className="flex items-center gap-3">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={formReasignar.licencias_ids.includes(lic.id)}
-                                                onChange={(e) => {
-                                                    const ids = e.target.checked 
-                                                        ? [...formReasignar.licencias_ids, lic.id]
-                                                        : formReasignar.licencias_ids.filter(id => id !== lic.id);
-                                                    setFormReasignar({...formReasignar, licencias_ids: ids});
-                                                }}
-                                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                            />
-                                            <span className="text-xs font-bold text-slate-700">{lic.nombre}</span>
-                                        </div>
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{lic.tipo}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <p className="text-[9px] text-slate-400 italic">* Las licencias no seleccionadas serán liberadas automáticamente.</p>
-                        </div>
-                      )}
-
-                      <FormInput label="Notas de entrega" value={formReasignar.notas} onChange={v => setFormReasignar({...formReasignar, notas: v})} />
-                      
-                      <button className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-[1.02] active:scale-[0.98] transition-all">
-                        Confirmar Reasignación
-                      </button>
-                  </form>
-              </div>
-          </div>
-      )}
+      <ModalReasignar 
+        isOpen={mostrarModalReasignar} 
+        onClose={() => setMostrarModalReasignar(false)} 
+        form={formReasignar}
+        setForm={setFormReasignar}
+        onSubmit={handleReasignar}
+        usuarios={catalogoUsuarios}
+        activo={activoSeleccionado || {}}
+      />
 
       {/* MODAL RESGUARDO (PDF PREVIEW) */}
       {mostrarModalResguardo && activoSeleccionado && (
@@ -1176,7 +1207,7 @@ const Inventario = ({ user, token }) => {
                       <button onClick={() => setMostrarModalFirma(false)} className="text-slate-400">✕</button>
                   </div>
                   <div className="p-8">
-                      <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} width={450} height={200} className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl cursor-crosshair shadow-inner" />
+                      <canvas ref={canvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} width={450} height={200} className="w-full max-w-sm mx-auto bg-slate-50 border-2 border-slate-100 rounded-2xl cursor-crosshair shadow-inner" />
                       <div className="flex gap-3 mt-6">
                           <button onClick={limpiarFirma} className="flex-1 border-2 border-slate-100 py-3 rounded-xl text-xs font-black text-slate-400 hover:bg-slate-50 transition-all">LIMPIAR PAD</button>
                           <button onClick={guardarFirma} className="flex-[2] bg-blue-600 text-white py-3 rounded-xl text-xs font-black shadow-lg shadow-blue-100 hover:scale-105 transition-all">GUARDAR FIRMA</button>
@@ -1343,175 +1374,50 @@ const Inventario = ({ user, token }) => {
       )}
 
       {/* MODAL CATÁLOGOS */}
-      {mostrarModalCatalogos && (
-          <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-              <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl overflow-hidden animate-fadeIn flex h-[600px]">
-                  {/* Sidebar Modal */}
-                  <div className="w-64 bg-slate-50 border-r border-slate-200 p-8">
-                      <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs mb-8">Administrar</h3>
-                      <div className="space-y-2">
-                          {[
-                            {id: 'marca', label: 'Marcas', icon: 'pi-tag'},
-                            {id: 'proveedor', label: 'Proveedores', icon: 'pi-truck'},
-                            {id: 'modelo_parte', label: 'Modelos por N° Parte', icon: 'pi-database'}
-                          ].map(t => (
-                              <button key={t.id} onClick={() => setFormNuevoCatalogo({...formNuevoCatalogo, tipo: t.id})} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all ${formNuevoCatalogo.tipo === t.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-500 hover:bg-slate-100'}`}>
-                                  <i className={`pi ${t.icon}`}></i> {t.label}
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-
-                  {/* Content Modal */}
-                  <div className="flex-1 flex flex-col">
-                      <div className="p-6 border-b flex justify-between items-center">
-                          <h4 className="font-bold text-slate-800">Listado de {formNuevoCatalogo.tipo === 'marca' ? 'Marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'Proveedores' : 'Modelos por N° Parte'}</h4>
-                          <button onClick={() => setMostrarModalCatalogos(false)}>✕</button>
-                      </div>
-                      
-                      <div className="flex-1 overflow-y-auto p-8 custom-scrollbar-light">
-                          <div className="grid grid-cols-1 gap-4">
-                              {(formNuevoCatalogo.tipo === 'marca' ? catalogoMarcas : formNuevoCatalogo.tipo === 'proveedor' ? catalogoProveedores : catalogoModelosParte).map(item => (
-                                  <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 group">
-                                      <div>
-                                          <p className="font-black text-slate-800 text-sm">{item.numero_parte ? `${item.numero_parte} - ${item.nombre}` : item.nombre}</p>
-                                          <p className="text-[10px] text-slate-400 font-bold uppercase">{item.descripcion || item.tipo || 'Sin descripción'}</p>
-                                      </div>
-                                      {isAdmin && (
-                                          <button 
-                                              onClick={async () => {
-                                                  if(!window.confirm("¿Eliminar este elemento?")) return;
-                                                  const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
-                                                  await clienteAxios.delete(`/catalogos/${url}/${item.id}`);
-                                                  cargarCatalogos();
-                                              }}
-                                              className="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-50 p-2 rounded-lg transition-all"
-                                          >
-                                              <i className="pi pi-trash"></i>
-                                          </button>
-                                      )}
-                                  </div>
-                              ))}
-                          </div>
-                      </div>
-
-                      {/* Footer Modal (Add Form) */}
-                      {isAdmin && (
-                          <form onSubmit={async (e) => {
-                                e.preventDefault();
-                                const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
-                                try {
-                                    const payload = formNuevoCatalogo.tipo === 'modelo_parte' ? {
-                                        numero_parte: formNuevoCatalogo.numero_parte,
-                                        nombre: formNuevoCatalogo.nombre,
-                                        descripcion: formNuevoCatalogo.descripcion,
-                                        tipo: formNuevoCatalogo.tipo_dev,
-                                        ram: formNuevoCatalogo.ram,
-                                        cpu: formNuevoCatalogo.cpu,
-                                        almacenamiento: formNuevoCatalogo.almacenamiento,
-                                        pulgadas: formNuevoCatalogo.pulgadas,
-                                        rma: formNuevoCatalogo.rma,
-                                        especificaciones_json: formNuevoCatalogo.atributos || {}
-                                    } : {
-                                        nombre: formNuevoCatalogo.nombre,
-                                        descripcion: formNuevoCatalogo.descripcion,
-                                        rfc: formNuevoCatalogo.rfc
-                                    };
-                                    await clienteAxios.post(`/catalogos/${url}`, payload);
-                                    alert("Registrado correctamente");
-                                    cargarCatalogos();
-                                    setFormNuevoCatalogo({ ...formNuevoCatalogo, nombre: '', descripcion: '', rfc: '', numero_parte: '', ram: '', cpu: '', almacenamiento: '', pulgadas: '', rma: '', atributos: {} });
-                                } catch (err) { alert("Error al registrar"); }
-                          }} className="p-6 bg-slate-50 border-t flex flex-col gap-4">
-                              {formNuevoCatalogo.tipo === 'modelo_parte' ? (
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-3 gap-3">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">N° Parte</label>
-                                            <input required placeholder="Ej: 20W0004XLM" value={formNuevoCatalogo.numero_parte || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, numero_parte: e.target.value})} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
-                                        </div>
-                                        <div className="space-y-1 col-span-2">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Nombre Comercial / Modelo</label>
-                                            <input required placeholder="Ej: ThinkPad L14 Gen 2" value={formNuevoCatalogo.nombre || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, nombre: e.target.value})} className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-4 gap-2">
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Procesador</label>
-                                            <input placeholder="i7-1165G7" value={formNuevoCatalogo.cpu || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, cpu: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RAM</label>
-                                            <input placeholder="16GB" value={formNuevoCatalogo.ram || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, ram: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">SSD/HDD</label>
-                                            <input placeholder="512GB" value={formNuevoCatalogo.almacenamiento || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, almacenamiento: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RMA/Soporte</label>
-                                            <input placeholder="Premier" value={formNuevoCatalogo.rma || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, rma: e.target.value})} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs outline-none" />
-                                        </div>
-                                    </div>
-                                    
-                                    {/* ATRIBUTOS DINÁMICOS (Impresoras, Teclados, etc) */}
-                                    <div className="bg-white border border-slate-200 p-3 rounded-2xl">
-                                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Características Especiales (DPI, Toner, Resolución, etc)</p>
-                                        <div className="flex gap-2">
-                                            <input id="key-attr" placeholder="Característica" className="flex-1 bg-slate-50 border border-slate-100 p-2 rounded-lg text-[10px] outline-none" />
-                                            <input id="val-attr" placeholder="Valor" className="flex-1 bg-slate-50 border border-slate-100 p-2 rounded-lg text-[10px] outline-none" />
-                                            <button type="button" onClick={() => {
-                                                const k = document.getElementById('key-attr').value;
-                                                const v = document.getElementById('val-attr').value;
-                                                if(!k || !v) return;
-                                                setFormNuevoCatalogo({...formNuevoCatalogo, atributos: {...(formNuevoCatalogo.atributos || {}), [k]: v}});
-                                                document.getElementById('key-attr').value = '';
-                                                document.getElementById('val-attr').value = '';
-                                            }} className="bg-slate-800 text-white px-3 rounded-lg text-[10px] font-bold">AGREGAR</button>
-                                        </div>
-                                        {Object.keys(formNuevoCatalogo.atributos || {}).length > 0 && (
-                                            <div className="flex flex-wrap gap-2 mt-2">
-                                                {Object.entries(formNuevoCatalogo.atributos).map(([k, v]) => (
-                                                    <span key={k} className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-2">
-                                                        {k}: {v}
-                                                        <button type="button" onClick={() => {
-                                                            const newAttr = {...formNuevoCatalogo.atributos};
-                                                            delete newAttr[k];
-                                                            setFormNuevoCatalogo({...formNuevoCatalogo, atributos: newAttr});
-                                                        }} className="text-blue-300 hover:text-blue-500">✕</button>
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                              ) : (
-                                <div className="flex gap-2">
-                                    <div className="flex-1 space-y-1">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Nombre</label>
-                                        <input required placeholder="Nombre" value={formNuevoCatalogo.nombre || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, nombre: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
-                                    </div>
-                                    {formNuevoCatalogo.tipo === 'proveedor' && (
-                                        <div className="w-40 space-y-1">
-                                            <label className="text-[9px] font-black text-slate-400 uppercase ml-1">RFC</label>
-                                            <input placeholder="RFC" value={formNuevoCatalogo.rfc || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, rfc: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
-                                        </div>
-                                    )}
-                                    <div className="flex-1 space-y-1">
-                                        <label className="text-[9px] font-black text-slate-400 uppercase ml-1">Descripción</label>
-                                        <input placeholder="Descripción" value={formNuevoCatalogo.descripcion || ''} onChange={e => setFormNuevoCatalogo({...formNuevoCatalogo, descripcion: e.target.value})} className="w-full bg-white border border-slate-200 p-3 rounded-xl text-xs outline-none focus:border-blue-500 shadow-sm" />
-                                    </div>
-                                </div>
-                              )}
-                              <button className="w-full bg-blue-600 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 hover:scale-[1.01] active:scale-[0.99]">
-                                Guardar en {formNuevoCatalogo.tipo === 'marca' ? 'Marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'Proveedores' : 'Catálogo de Partes'}
-                              </button>
-                          </form>
-                      )}
-                  </div>
-              </div>
-          </div>
-      )}
+      <ModalCatalogos 
+        isOpen={mostrarModalCatalogos}
+        onClose={() => setMostrarModalCatalogos(false)}
+        tipo={formNuevoCatalogo.tipo}
+        setTipo={(tipo) => setFormNuevoCatalogo({...formNuevoCatalogo, tipo})}
+        catalogoMarcas={catalogoMarcas}
+        catalogoProveedores={catalogoProveedores}
+        catalogoModelosParte={catalogoModelosParte}
+        isAdmin={isAdmin}
+        onDelete={async (tipo, id) => {
+            if(!window.confirm("¿Eliminar este elemento?")) return;
+            const url = tipo === 'marca' ? 'marcas' : tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
+            await clienteAxios.delete(`/catalogos/${url}/${id}`);
+            cargarCatalogos();
+        }}
+        onSubmit={async (e) => {
+            e.preventDefault();
+            const url = formNuevoCatalogo.tipo === 'marca' ? 'marcas' : formNuevoCatalogo.tipo === 'proveedor' ? 'proveedores' : 'modelos-parte';
+            try {
+                const payload = formNuevoCatalogo.tipo === 'modelo_parte' ? {
+                    numero_parte: formNuevoCatalogo.numero_parte,
+                    nombre: formNuevoCatalogo.nombre,
+                    descripcion: formNuevoCatalogo.descripcion,
+                    tipo: formNuevoCatalogo.tipo_dev,
+                    ram: formNuevoCatalogo.ram,
+                    cpu: formNuevoCatalogo.cpu,
+                    almacenamiento: formNuevoCatalogo.almacenamiento,
+                    pulgadas: formNuevoCatalogo.pulgadas,
+                    rma: formNuevoCatalogo.rma,
+                    especificaciones_json: formNuevoCatalogo.atributos || {}
+                } : {
+                    nombre: formNuevoCatalogo.nombre,
+                    descripcion: formNuevoCatalogo.descripcion,
+                    rfc: formNuevoCatalogo.rfc
+                };
+                await clienteAxios.post(`/catalogos/${url}`, payload);
+                alert("Registrado correctamente");
+                cargarCatalogos();
+                setFormNuevoCatalogo({ ...formNuevoCatalogo, nombre: '', descripcion: '', rfc: '', numero_parte: '', ram: '', cpu: '', almacenamiento: '', pulgadas: '', rma: '', atributos: {} });
+            } catch (err) { alert("Error al registrar"); }
+        }}
+        form={formNuevoCatalogo}
+        setForm={setFormNuevoCatalogo}
+      />
 
       {/* CSS ANIMATIONS & PRINT */}
       <style>{`

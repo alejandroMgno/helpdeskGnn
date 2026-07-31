@@ -9,6 +9,7 @@ const MesaAyuda = ({ user }) => {
   const [comentarios, setComentarios] = useState([]);
   const [activosUsuario, setActivosUsuario] = useState([]);
   const [tecnicos, setTecnicos] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
   const [slaConfigs, setSlaConfigs] = useState([]);
   const [cargando, setCargando] = useState(true);
 
@@ -45,7 +46,7 @@ const MesaAyuda = ({ user }) => {
   const [paginaHistorial, setPaginaHistorial] = useState(0);
   const limitHistorial = 15;
 
-  const [formTicket, setFormTicket] = useState({ titulo: '', departamento: 'Soporte N1', prioridad: 'Media', activo_id: '', descripcion: '' });
+  const [formTicket, setFormTicket] = useState({ titulo: '', departamento: 'Soporte N1', prioridad: 'Media', activo_id: '', descripcion: '', solicitante_id: '' });
   const [estrellas, setEstrellas] = useState(0);
   const [feedback, setFeedback] = useState("");
 
@@ -69,6 +70,7 @@ const MesaAyuda = ({ user }) => {
     try {
       let urlActivos = `/tickets/?limit=100`;
       let urlCounts = `/tickets/stats/counts`;
+      let urlUsuarios = `/usuarios/`;
 
       const params = new URLSearchParams();
       if (query) params.append('q', query);
@@ -80,15 +82,17 @@ const MesaAyuda = ({ user }) => {
         urlCounts += `?${queryString}`;
       }
 
-      const [resActivos, resCounts] = await Promise.all([
+      const [resActivos, resCounts, resUsuarios] = await Promise.all([
         clienteAxios.get(urlActivos),
-        clienteAxios.get(urlCounts)
+        clienteAxios.get(urlCounts),
+        clienteAxios.get(urlUsuarios)
       ]);
 
       // Filtrar para el Kanban (No cerrados)
       const activos = resActivos.data.filter(t => t.estatus !== 'Cerrado' && t.estatus !== 'Cancelado');
       setTickets(activos);
       setCounts(resCounts.data);
+      setUsuarios(resUsuarios.data);
     } catch (error) { console.error(error); }
   };
 
@@ -268,16 +272,24 @@ const MesaAyuda = ({ user }) => {
   // ==========================================
   const manejarCreacionTicket = async (e) => {
     e.preventDefault();
+    const formData = new FormData();
+    formData.append('titulo', formTicket.titulo);
+    formData.append('descripcion', formTicket.descripcion);
+    formData.append('prioridad', formTicket.prioridad);
+    formData.append('departamento', formTicket.departamento);
+    if (formTicket.activo_id) formData.append('activo_id', formTicket.activo_id);
+    if (fileInputTicketRef.current?.files[0]) formData.append('adjunto', fileInputTicketRef.current.files[0]);
+    
     try {
-      const res = await clienteAxios.post('/tickets/', { ...formTicket, activo_id: formTicket.activo_id ? parseInt(formTicket.activo_id) : null });
-      setMostrarModalNuevo(false);
-      setFormTicket({ titulo: '', departamento: 'Soporte N1', prioridad: 'Media', activo_id: '', descripcion: '' });
-      // Refrescar lista completa para asegurar consistencia con filtros/roles
-      fetchTickets();
-      alert("Ticket creado con éxito.");
+        await clienteAxios.post('/tickets/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        setMostrarModalNuevo(false);
+        setFormTicket({ titulo: '', departamento: 'Soporte N1', prioridad: 'Media', activo_id: '', descripcion: '' });
+        if (fileInputTicketRef.current) fileInputTicketRef.current.value = '';
+        fetchTickets();
+        alert("Ticket creado con éxito.");
     } catch (error) { 
-      console.error(error);
-      alert(error.response?.data?.detail || "Error al crear ticket"); 
+        console.error(error);
+        alert(error.response?.data?.detail || "Error al crear ticket"); 
     }
   };
 
@@ -355,10 +367,19 @@ const MesaAyuda = ({ user }) => {
 
   const enviarComentario = async (e) => {
     e.preventDefault();
+    if (!nuevoComentario.trim() && !fileInputChatRef.current?.files[0]) {
+        alert("El comentario debe tener texto o un adjunto");
+        return;
+    }
+    const formData = new FormData();
+    if (nuevoComentario.trim()) formData.append('texto', nuevoComentario);
+    if (fileInputChatRef.current?.files[0]) formData.append('adjunto', fileInputChatRef.current.files[0]);
+
     try {
-      await clienteAxios.post(`/tickets/${ticketSeleccionado.id}/comentarios`, { texto: nuevoComentario });
-      setNuevoComentario("");
-      abrirTicket(ticketSeleccionado);
+        await clienteAxios.post(`/tickets/${ticketSeleccionado.id}/comentarios`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        setNuevoComentario("");
+        if (fileInputChatRef.current) fileInputChatRef.current.value = '';
+        abrirTicket(ticketSeleccionado);
     } catch (error) { console.error(error); }
   };
 
@@ -442,9 +463,11 @@ const MesaAyuda = ({ user }) => {
                               ticket.sla_estado_visual === 'amarillo' ? 'bg-amber-400' : 'bg-emerald-500'
                            }`}></span>
                         )}
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getPrioridadColor(ticket.prioridad).bg} ${getPrioridadColor(ticket.prioridad).text}`}>
-                          {ticket.prioridad.split(' ')[0]}
-                        </span>
+                        {['Admin', 'Tecnico'].includes(user?.rol) && (
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${getPrioridadColor(ticket.prioridad).bg} ${getPrioridadColor(ticket.prioridad).text}`}>
+                            {ticket.prioridad.split(' ')[0]}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <h4 className="text-sm font-bold text-slate-800 line-clamp-2">{ticket.titulo}</h4>
@@ -604,9 +627,11 @@ const MesaAyuda = ({ user }) => {
                           <p className="text-xs font-bold text-blue-600">{t.tecnico?.nombre_completo || 'Sin asignar'}</p>
                         </td>
                         <td className="p-4">
-                          <span className={`text-[9px] font-black px-2 py-1 rounded-lg uppercase ${getPrioridadColor(t.prioridad).bg} ${getPrioridadColor(t.prioridad).text}`}>
-                            {t.prioridad}
-                          </span>
+                          {['Admin', 'Tecnico'].includes(user?.rol) && (
+                            <span className={`text-[9px] font-black px-2 py-1 rounded-lg uppercase ${getPrioridadColor(t.prioridad).bg} ${getPrioridadColor(t.prioridad).text}`}>
+                              {t.prioridad}
+                            </span>
+                          )}
                         </td>
                         <td className="p-4 text-[10px] font-bold text-slate-400">{new Date(t.fecha_creacion).toLocaleDateString()}</td>
                         <td className="p-4 text-[10px] font-bold text-emerald-600">{t.fecha_resolucion ? new Date(t.fecha_resolucion).toLocaleDateString() : '-'}</td>
@@ -690,6 +715,15 @@ const MesaAyuda = ({ user }) => {
                   <div key={c.id} className="bg-white p-3 rounded border border-slate-200 text-sm shadow-sm">
                     <div className="flex justify-between mb-1"><span className="font-bold text-blue-600">{c.autor}</span><span className="text-[10px] text-slate-400">{c.fecha}</span></div>
                     <p className="text-slate-700">{c.texto}</p>
+                    {c.adjunto_url && (
+                        <div className="mt-2">
+                            {['.jpg', '.jpeg', '.png', '.gif'].some(ext => c.adjunto_nombre.toLowerCase().endsWith(ext)) ? (
+                                <img src={`http://localhost:8000/${c.adjunto_url.replace('\\', '/')}`} alt="adjunto" className="max-w-full rounded border" />
+                            ) : (
+                                <a href={`http://localhost:8000/${c.adjunto_url.replace('\\', '/')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">📁 {c.adjunto_nombre}</a>
+                            )}
+                        </div>
+                    )}
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -825,6 +859,12 @@ const MesaAyuda = ({ user }) => {
             
             <div className="p-4 border-t bg-white">
               <form onSubmit={enviarComentario} className="flex gap-2">
+                <input type="file" ref={fileInputChatRef} className="hidden" />
+                <button type="button" onClick={() => fileInputChatRef.current.click()} className="p-2 text-slate-400 hover:text-blue-600">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.586 6.586a6 6 0 108.486 8.486L20 13" />
+                  </svg>
+                </button>
                 <input value={nuevoComentario} onChange={e => setNuevoComentario(e.target.value)} placeholder="Responder..." className="flex-1 border rounded px-3 py-2 text-sm outline-none focus:border-blue-500" disabled={['Cerrado', 'Cancelado'].includes(ticketSeleccionado.estatus)} />
                 <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold disabled:opacity-50" disabled={['Cerrado', 'Cancelado'].includes(ticketSeleccionado.estatus)}>Enviar</button>
               </form>
@@ -847,14 +887,16 @@ const MesaAyuda = ({ user }) => {
                 <input required value={formTicket.titulo} onChange={e => setFormTicket({...formTicket, titulo: e.target.value})} className="w-full border rounded px-3 py-2 text-sm" placeholder="Resumen del problema..." />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Prioridad</label>
-                  <select value={formTicket.prioridad} onChange={e => setFormTicket({...formTicket, prioridad: e.target.value})} className="w-full border rounded px-3 py-2 text-sm">
-                    {slaConfigs.map(config => (
-                      <option key={config.id} value={config.prioridad}>{config.prioridad} ({config.horas}h)</option>
-                    ))}
-                  </select>
-                </div>
+                {['Admin', 'Tecnico'].includes(user?.rol) && (
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Prioridad</label>
+                    <select value={formTicket.prioridad} onChange={e => setFormTicket({...formTicket, prioridad: e.target.value})} className="w-full border rounded px-3 py-2 text-sm">
+                      {slaConfigs.map(config => (
+                        <option key={config.id} value={config.prioridad}>{config.prioridad} ({config.horas}h)</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Equipo</label>
                   <select required value={formTicket.activo_id} onChange={e => setFormTicket({...formTicket, activo_id: e.target.value})} className="w-full border rounded px-3 py-2 text-sm">
@@ -866,6 +908,10 @@ const MesaAyuda = ({ user }) => {
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Descripción</label>
                 <textarea required value={formTicket.descripcion} onChange={e => setFormTicket({...formTicket, descripcion: e.target.value})} className="w-full border rounded px-3 py-2 text-sm h-32" placeholder="Describe a detalle lo ocurrido..."></textarea>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase block mb-1">Evidencia (Opcional)</label>
+                <input type="file" ref={fileInputTicketRef} className="w-full border rounded px-3 py-2 text-sm" />
               </div>
               <button type="submit" className="w-full bg-blue-600 text-white py-2.5 rounded font-bold hover:bg-blue-700 transition">Enviar Solicitud</button>
             </form>

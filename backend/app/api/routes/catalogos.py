@@ -3,7 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_active_user
 from app.models.usuario import RolUsuario
-from app.models.catalogos import Marca, Proveedor, SLAConfig, CategoriaActivo, Zona, CentroCosto, Departamento, Puesto, ModeloParte
+from app.models.catalogos import (
+    Marca, Proveedor, SLAConfig, CategoriaActivo, 
+    Zona, CentroCosto, Departamento, Puesto, 
+    ModeloParte, AsignacionTecnica
+)
 from app.schemas.catalogos import (
     MarcaCreate, MarcaResponse, 
     ProveedorCreate, ProveedorResponse,
@@ -13,10 +17,37 @@ from app.schemas.catalogos import (
     CentroCostoCreate, CentroCostoResponse,
     PuestoCreate, PuestoResponse,
     DepartamentoCreate, DepartamentoResponse,
-    ModeloParteCreate, ModeloParteResponse
+    ModeloParteCreate, ModeloParteResponse,
+    AsignacionTecnicaCreate, AsignacionTecnicaResponse
 )
 
 router = APIRouter()
+
+# --- ASIGNACIÓN TÉCNICA ---
+@router.post("/asignaciones-tecnicas", response_model=AsignacionTecnicaResponse)
+def crear_asignacion(asignacion_in: AsignacionTecnicaCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    if current_user.rol != RolUsuario.Admin:
+        raise HTTPException(status_code=403, detail="Solo administradores")
+    db_obj = AsignacionTecnica(**asignacion_in.model_dump())
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return db_obj
+
+@router.get("/asignaciones-tecnicas", response_model=List[AsignacionTecnicaResponse])
+def listar_asignaciones(db: Session = Depends(get_db)):
+    return db.query(AsignacionTecnica).all()
+
+@router.delete("/asignaciones-tecnicas/{id}")
+def eliminar_asignacion(id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    if current_user.rol != RolUsuario.Admin:
+        raise HTTPException(status_code=403, detail="Solo administradores")
+    db_obj = db.query(AsignacionTecnica).filter(AsignacionTecnica.id == id).first()
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="No encontrada")
+    db.delete(db_obj)
+    db.commit()
+    return {"status": "deleted"}
 
 # --- ZONAS ---
 @router.post("/zonas", response_model=ZonaResponse)

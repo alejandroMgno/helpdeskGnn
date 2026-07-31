@@ -11,6 +11,7 @@ const Usuarios = ({ user, token }) => {
   const [zonas, setZonas] = useState([]);
   const [departamentos, setDepartamentos] = useState([]);
   const [puestos, setPuestos] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
 
   // --- PAGINACIÓN ---
   const [paginaActual, setPaginaActual] = useState(1);
@@ -69,17 +70,19 @@ const Usuarios = ({ user, token }) => {
     setCargando(true);
     try {
       const headers = { 'Authorization': `Bearer ${token}` };
-      const [resUsers, resZonas, resDeps, resPuestos] = await Promise.all([
+      const [resUsers, resZonas, resDeps, resPuestos, resAsign] = await Promise.all([
         fetch('http://localhost:8000/api/v1/usuarios/', { headers }),
         fetch('http://localhost:8000/api/v1/catalogos/zonas', { headers }),
         fetch('http://localhost:8000/api/v1/catalogos/departamentos', { headers }),
-        fetch('http://localhost:8000/api/v1/catalogos/puestos', { headers })
+        fetch('http://localhost:8000/api/v1/catalogos/puestos', { headers }),
+        fetch('http://localhost:8000/api/v1/catalogos/asignaciones-tecnicas', { headers })
       ]);
 
       if (resUsers.ok) setUsuarios(await resUsers.json());
       if (resZonas.ok) setZonas(await resZonas.json());
       if (resDeps.ok) setDepartamentos(await resDeps.json());
       if (resPuestos.ok) setPuestos(await resPuestos.json());
+      if (resAsign.ok) setAsignaciones(await resAsign.json());
 
     } catch (error) {
       console.error("Error al cargar datos:", error);
@@ -103,10 +106,20 @@ const Usuarios = ({ user, token }) => {
     }
 
     try {
+      // Limpiar campos vacíos antes de enviar
+      const dataToSend = { ...formNuevoUsuario };
+      Object.keys(dataToSend).forEach(key => {
+        if (dataToSend[key] === '') dataToSend[key] = null;
+      });
+      // Asegurarse de que los IDs sean números si no son null
+      if (dataToSend.tecnico_principal_id) dataToSend.tecnico_principal_id = parseInt(dataToSend.tecnico_principal_id);
+      if (dataToSend.tecnico_secundario_id) dataToSend.tecnico_secundario_id = parseInt(dataToSend.tecnico_secundario_id);
+      if (dataToSend.edad) dataToSend.edad = parseInt(dataToSend.edad);
+      
       const response = await fetch('http://localhost:8000/api/v1/usuarios/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(formNuevoUsuario)
+        body: JSON.stringify(dataToSend)
       });
 
       if (response.ok) {
@@ -148,10 +161,22 @@ const Usuarios = ({ user, token }) => {
     }
 
     try {
+      // Limpiar campos vacíos antes de enviar
+      const dataToSend = { ...formEditarUsuario };
+      Object.keys(dataToSend).forEach(key => {
+        if (dataToSend[key] === '') dataToSend[key] = null;
+      });
+      // Asegurarse de que los IDs sean números si no son null
+      if (dataToSend.tecnico_principal_id) dataToSend.tecnico_principal_id = parseInt(dataToSend.tecnico_principal_id);
+      if (dataToSend.tecnico_secundario_id) dataToSend.tecnico_secundario_id = parseInt(dataToSend.tecnico_secundario_id);
+      if (dataToSend.edad) dataToSend.edad = parseInt(dataToSend.edad);
+      // Limpiar password si está vacío para no enviarlo
+      if (!dataToSend.password) delete dataToSend.password;
+
       const response = await fetch(`http://localhost:8000/api/v1/usuarios/${formEditarUsuario.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(formEditarUsuario)
+        body: JSON.stringify(dataToSend)
       });
 
       if (response.ok) {
@@ -248,7 +273,20 @@ const Usuarios = ({ user, token }) => {
   const handleCambioDepartamento = (deptNombre, setForm, currentForm) => {
     const deptObj = departamentos.find(d => d.nombre === deptNombre && d.zona?.nombre === currentForm.zona);
     const ccCodigo = deptObj?.centro_costo?.codigo || '';
-    setForm({ ...currentForm, departamento: deptNombre, centro_costo: ccCodigo });
+    
+    // Auto-assignment logic
+    const asignacion = asignaciones.find(a => 
+      a.zona_id == deptObj?.zona?.id && 
+      a.departamento_id == deptObj?.id
+    );
+
+    setForm({ 
+      ...currentForm, 
+      departamento: deptNombre, 
+      centro_costo: ccCodigo,
+      tecnico_principal_id: asignacion?.tecnico_principal_id || '',
+      tecnico_secundario_id: asignacion?.tecnico_secundario_id || ''
+    });
   };
 
   const handleCambioHorario = (diaIdx, campo, valor, setForm, currentForm) => {
@@ -997,6 +1035,31 @@ const Usuarios = ({ user, token }) => {
                     <p className="text-blue-600 font-medium text-sm">{usuarioSeleccionado.email}</p>
                   </div>
                 </div>
+                
+                {/* BOTÓN REENVIAR VERIFICACIÓN */}
+                {!usuarioSeleccionado.is_email_verified && (
+                  <button 
+                    onClick={async () => {
+                      try {
+                        const response = await fetch(`http://localhost:8000/api/v1/usuarios/${usuarioSeleccionado.id}/resend-verification`, {
+                          method: 'POST',
+                          headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (response.ok) {
+                          alert("Correo de verificación reenviado exitosamente.");
+                        } else {
+                          const err = await response.json();
+                          alert(`Error: ${err.detail}`);
+                        }
+                      } catch (error) {
+                        alert("Error de conexión al reenviar correo.");
+                      }
+                    }}
+                    className="mt-2 w-full bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-xs py-2 px-4 rounded border border-amber-200 transition-colors shadow-sm"
+                  >
+                    <i className="pi pi-envelope mr-2"></i> Reenviar Correo de Verificación
+                  </button>
+                )}
 
                 <div className="mt-5 pt-4 border-t border-slate-200 flex gap-2 flex-wrap">
                   <span className={`px-2.5 py-1 rounded text-[10px] font-bold border uppercase tracking-wider ${getRolBadge(usuarioSeleccionado.rol)}`}>{usuarioSeleccionado.rol}</span>

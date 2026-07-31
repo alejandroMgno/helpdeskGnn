@@ -59,7 +59,9 @@ function App() {
 
     let timeoutId;
     const connectNotificationWS = () => {
-      const wsUrl = `ws://${window.location.hostname}:8000/api/v1/tickets/ws/notifications/${user.id}`;
+      // const wsUrl = `ws://${window.location.hostname}:8000/api/v1/tickets/ws/notifications/${user.id}`;
+      const wsUrl =`${window.location.protocol === "https:" ? "wss" : "ws"}://01vqbx8b-8000.usw3.devtunnels.ms/api/v1/tickets/ws/notifications/${user.id}`;
+
       const socket = new WebSocket(wsUrl);
 
       socket.onopen = () => console.log("App: Notification WS Conectado ✅");
@@ -91,6 +93,23 @@ function App() {
       clearTimeout(timeoutId);
     };
   }, [user?.id, token]);
+
+  // EFECTO: Verificar email por enlace
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith('/verify-email/')) {
+      const token = path.split('/')[2];
+      clienteAxios.get(`/auth/verify-email/${token}`)
+        .then(res => {
+          alert("Cuenta verificada correctamente");
+          window.location.href = '/';
+        })
+        .catch(err => {
+          alert("Error al verificar: " + (err.response?.data?.detail || "Token inválido"));
+          window.location.href = '/';
+        });
+    }
+  }, []);
 
   const handleLogout = async () => {
     try {

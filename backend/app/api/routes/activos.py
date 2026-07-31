@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_user, get_current_active_user
 from app.models.usuario import Usuario, RolUsuario
 from app.models.activo import Activo, Mantenimiento, activo_licencia, TipoActivo, EstatusActivo
+from app.models.documento import DocumentoActivo
 from app.models.licencia import Licencia
 from app.models.catalogos import Marca, Proveedor
 from dateutil.relativedelta import relativedelta
@@ -220,6 +221,11 @@ def listar_activos(db: Session = Depends(get_db), current_user: Usuario = Depend
     # Si es Admin/Técnico, ve todo el inventario
     return query.all()
 
+from app.services.pdf_service import generar_pdf_resguardo
+from app.services.email_service import enviar_email, notificar_activo_asignado
+
+# ... (rest of imports)
+
 # ==========================================
 # NUEVO: RUTA PARA EDITAR Y REASIGNAR (PUT)
 # ==========================================
@@ -239,34 +245,77 @@ def actualizar_activo(activo_id: int, activo_in: ActivoUpdate, background_tasks:
     notas_historial = update_data.pop("notas", None)
     
     # ✅ LÓGICA DE ESTATUS AUTOMÁTICO Y NOTIFICACIONES:
-    # Si se asigna un usuario y no se especifica estatus, o es 'Disponible', cambiar a 'Asignado'
     cambio_asignacion = False
     usuario_anterior = activo.usuario
+    nuevo_user = None
+
     if "usuario_id" in update_data:
         nuevo_usuario_id = update_data["usuario_id"]
         if nuevo_usuario_id != activo.usuario_id:
+            # Si el activo ya tiene un resguardo firmado y está asignado, no permitir reasignación sin liberar explícitamente
+            if activo.estatus == EstatusActivo.Asignado and activo.firma_resguardo:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="El activo ya cuenta con un resguardo firmado. Debe liberarlo a 'Disponible' antes de reasignarlo."
+                )
+
             cambio_asignacion = True
             if nuevo_usuario_id is not None:
                 if "estatus" not in update_data or update_data["estatus"] == "Disponible":
                     update_data["estatus"] = "Asignado"
                 
-                # Notificar al nuevo usuario
                 nuevo_user = db.query(Usuario).filter(Usuario.id == nuevo_usuario_id).first()
                 if nuevo_user:
-                    background_tasks.add_task(notificar_activo_asignado, nuevo_user.email, activo.nombre, activo.codigo, "Asignación de Activo (Alta)")
+                    # LÓGICA HISTORIAL USUARIOS (MAX 5)
+                    historial = list(activo.usuario_historial) if activo.usuario_historial else []
+                    if activo.usuario_id:
+                        historial.insert(0, activo.usuario_id)
+                    historial = historial[:5]
+                    activo.usuario_historial = historial
+
+                    # REGLA: Solo generar resguardo si está limpio (sin firma previa o recién reasignado)
+                    # La firma se limpia automáticamente abajo si el activo estaba firmado y se cambia el usuario.
+                    
+                    # GENERAR PDF Y ENVIAR EMAIL (Incluyendo firma si existe)
+                    firma_base64 = update_data.get("firma_base64")
+                    
+                    # Si viene una nueva firma, la guardamos. Si no, mantenemos la anterior si el activo no cambió de usuario
+                    if firma_base64:
+                        activo.firma_resguardo = firma_base64
+                    elif activo.usuario_id != nuevo_usuario_id:
+                        # Si cambia de usuario, se limpia la firma anterior para obligar a nueva firma
+                        activo.firma_resguardo = None
+                    
+                    ruta_pdf = generar_pdf_resguardo(activo.id, activo.nombre, activo.codigo, nuevo_user.nombre_completo, datetime.utcnow().strftime("%Y-%m-%d"), firma_base64=activo.firma_resguardo)
+                    
+                    # Guardar en BD
+                    nuevo_doc = DocumentoActivo(
+                        activo_id=activo.id,
+                        nombre_archivo=os.path.basename(ruta_pdf),
+                        ruta_archivo=ruta_pdf,
+                        tipo_documento="Resguardo",
+                        categoria="Resguardo",
+                        is_signed=bool(activo.firma_resguardo)
+                    )
+                    db.add(nuevo_doc)
+
+                    html_content = f"<h2>Nuevo Resguardo de Activo</h2><p>Se ha asignado el activo {activo.nombre} a su cuenta. Se adjunta el resguardo firmado.</p>"
+                    background_tasks.add_task(enviar_email, nuevo_user.email, "Nuevo Resguardo de Activo", html_content, ruta_pdf)
+
+                    background_tasks.add_task(notificar_activo_asignado, nuevo_user.email, activo, "Asignación de Activo (Alta)")
                 
-                # Si tenía un usuario anterior, avisarle de la desvinculación
                 if usuario_anterior:
-                    background_tasks.add_task(notificar_activo_asignado, usuario_anterior.email, activo.nombre, activo.codigo, "Retiro de Activo de su Inventario")
+                    background_tasks.add_task(notificar_activo_asignado, usuario_anterior.email, activo, "Retiro de Activo de su Inventario")
             else:
-                if activo.estatus == "Asignado":
-                    update_data["estatus"] = "Disponible"
-                # 🚀 LIBERAR LICENCIAS AUTOMÁTICAMENTE AL VOLVER A STOCK
+                # Liberación a stock
+                update_data["estatus"] = "Disponible"
+                activo.firma_resguardo = None # ✅ Limpiar firma al liberar
                 activo.licencias = []
                 
-                # Avisar al usuario anterior de la liberación
                 if usuario_anterior:
-                    background_tasks.add_task(notificar_activo_asignado, usuario_anterior.email, activo.nombre, activo.codigo, "Retiro de Activo de su Inventario")
+                    background_tasks.add_task(notificar_activo_asignado, usuario_anterior.email, activo, "Retiro de Activo de su Inventario")
+
+    # ... (rest of existing logic for updating fields, mantenimientos, and histories)
 
     # Si se cambia el último mantenimiento o los meses, recalculamos el próximo
     if "fecha_ultimo_mantenimiento" in update_data or "meses_mantenimiento" in update_data:
@@ -382,13 +431,62 @@ def registrar_mantenimiento(
     
     return nuevo_manto
 
+
 # ==========================================
-# NUEVO: RUTA PARA SUBIR FACTURAS EN PDF
+# RUTA PARA SUBIR DOCUMENTOS FIRMADOS
+# ==========================================
+@router.post("/{activo_id}/firmar-resguardo")
+def subir_documento_firmado(
+    activo_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user)
+):
+    activo = db.query(Activo).filter(Activo.id == activo_id).first()
+    if not activo:
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
+
+    # Permitir PDF o PNG
+    if not (file.filename.endswith('.pdf') or file.filename.endswith('.png')):
+        raise HTTPException(status_code=400, detail="El archivo debe ser un PDF o PNG.")
+
+    # Crear el directorio si no existe
+    directory = f"uploads/resguardos/{activo_id}"
+    os.makedirs(directory, exist_ok=True)
+
+    # Definir la ruta del archivo con un nombre único basado en timestamp
+    extension = os.path.splitext(file.filename)[1]
+    filename = f"resguardo_firmado_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}{extension}"
+    file_path = os.path.join(directory, filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Crear entrada en BD
+    nuevo_doc = DocumentoActivo(
+        activo_id=activo_id,
+        nombre_archivo=filename,
+        ruta_archivo=file_path,
+        tipo_documento="Resguardo Firmado"
+    )
+    db.add(nuevo_doc)
+
+    # Notificar al usuario (quien firmó es current_user)
+    html_content = f"<h2>Resguardo Recibido</h2><p>Hemos recibido el resguardo firmado del activo {activo.nombre}.</p>"
+    enviar_email(current_user.email, "Resguardo Recibido", html_content)
+    
+    db.commit()
+    return {"status": "ok", "message": "Resguardo firmado recibido y procesado."}
+
+from app.models.documento import DocumentoActivo
+
+# ==========================================
+# RUTA PARA SUBIR DOCUMENTOS EN PDF
 # ==========================================
 @router.post("/{activo_id}/documentos")
 def subir_documentos(
     activo_id: int, 
-    files: List[UploadFile] = File(...), # <-- Ahora recibe una lista de archivos
+    files: List[UploadFile] = File(...),
     db: Session = Depends(get_db), 
     current_user: Usuario = Depends(get_current_active_user)
 ):
@@ -399,19 +497,21 @@ def subir_documentos(
     if not activo:
         raise HTTPException(status_code=404, detail="Activo no encontrado.")
 
-    # Asegurarnos de que existe la lista
-    documentos_actuales = list(activo.documentos) if activo.documentos else []
-
     for file in files:
         if file.filename.endswith('.pdf'):
             file_path = f"uploads/facturas/activo_{activo_id}_{file.filename}"
             with open(file_path, "wb") as buffer:
                 import shutil
                 shutil.copyfileobj(file.file, buffer)
-            documentos_actuales.append(file_path)
-
-    # Reasignamos la lista actualizada al activo
-    activo.documentos = documentos_actuales
+            
+            # Crear nueva entrada en la BD
+            nuevo_doc = DocumentoActivo(
+                activo_id=activo_id,
+                nombre_archivo=file.filename,
+                ruta_archivo=file_path,
+                tipo_documento="Factura"
+            )
+            db.add(nuevo_doc)
 
     # Registrar en historial
     historial_actual = list(activo.historial) if activo.historial else []
@@ -427,7 +527,8 @@ def subir_documentos(
     db.commit()
     db.refresh(activo)
     
-    return {"status": "ok", "documentos": activo.documentos}
+    return {"status": "ok", "documentos": [d.nombre_archivo for d in activo.documentos_relacionados]}
+
 
 @router.post("/{activo_id}/baja")
 async def dar_de_baja_especifica(
@@ -452,20 +553,27 @@ async def dar_de_baja_especifica(
         raise HTTPException(status_code=400, detail="La factura de venta (PDF) es obligatoria.")
 
     # Procesar archivos
-    documentos_actuales = list(activo.documentos) if activo.documentos else []
     if files:
         for file in files:
             if file.filename.endswith('.pdf'):
                 file_path = f"uploads/facturas/baja_{motivo.lower()}_{activo_id}_{file.filename}"
                 with open(file_path, "wb") as buffer:
+                    import shutil
                     shutil.copyfileobj(file.file, buffer)
-                documentos_actuales.append(file_path)
+                
+                # Crear nueva entrada en la BD
+                nuevo_doc = DocumentoActivo(
+                    activo_id=activo_id,
+                    nombre_archivo=file.filename,
+                    ruta_archivo=file_path,
+                    tipo_documento=f"Baja por {motivo}"
+                )
+                db.add(nuevo_doc)
 
     # Actualizar Activo
     activo.estatus = EstatusActivo.Baja if motivo != "Obsolescencia" else EstatusActivo.Obsoleto
     activo.motivo_baja = motivo
     activo.fecha_baja = datetime.utcnow()
-    activo.documentos = documentos_actuales
     
     # Liberar usuario y licencias
     activo.usuario_id = None
@@ -545,3 +653,20 @@ def eliminar_activo(activo_id: int, db: Session = Depends(get_db), current_user:
 
     db.commit()
     return {"status": "ok", "mensaje": "Activo dado de baja y licencias liberadas"}
+
+@router.delete("/{activo_id}/documentos/{documento_id}")
+def eliminar_documento(activo_id: int, documento_id: int, db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_active_user)):
+    if current_user.rol not in [RolUsuario.Admin, RolUsuario.Tecnico]:
+        raise HTTPException(status_code=403, detail="No tienes permisos.")
+
+    doc = db.query(DocumentoActivo).filter(DocumentoActivo.id == documento_id, DocumentoActivo.activo_id == activo_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    
+    # Eliminar archivo físico si existe
+    if os.path.exists(doc.ruta_archivo):
+        os.remove(doc.ruta_archivo)
+    
+    db.delete(doc)
+    db.commit()
+    return {"status": "ok", "mensaje": "Documento eliminado"}

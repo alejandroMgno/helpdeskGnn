@@ -227,9 +227,10 @@ const Conocimiento = ({ user }) => {
                     {articulo.titulo}
                   </h3>
 
-                  <p className="text-sm text-slate-600 mb-5 line-clamp-3 flex-1 leading-relaxed">
-                    {articulo.contenido.replace(/!\[.*?\]\(.*?\)/g, '[Imagen Adjunta]')}
-                  </p>
+                  <div 
+                    className="text-sm text-slate-600 mb-5 line-clamp-3 flex-1 leading-relaxed [&>h1]:text-base [&>h1]:font-bold [&>h2]:text-sm [&>h2]:font-bold" 
+                    dangerouslySetInnerHTML={{ __html: articulo.contenido.replace(/<[^>]*>?/gm, ' ') }} 
+                  />
 
                   <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-100">
                     <div className="flex items-center gap-2.5">
@@ -397,9 +398,25 @@ const Conocimiento = ({ user }) => {
               </div>
               <div className="flex items-center gap-2">
                 {['Admin', 'Tecnico'].includes(user?.rol) && (
-                  <button onClick={abrirParaEditar} className="text-slate-600 hover:text-amber-600 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded transition font-semibold text-xs flex items-center gap-1.5 shadow-sm">
-                    Editar Artículo
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={abrirParaEditar} className="text-slate-600 hover:text-amber-600 bg-white hover:bg-slate-100 border border-slate-300 px-3 py-1.5 rounded transition font-semibold text-xs flex items-center gap-1.5 shadow-sm">
+                      Editar
+                    </button>
+                    <button onClick={async () => {
+                      if (window.confirm('¿Estás seguro de eliminar este artículo?')) {
+                        try {
+                          await clienteAxios.delete(`/articulos/${articuloSeleccionado.id}`);
+                          setArticulos(articulos.filter(a => a.id !== articuloSeleccionado.id));
+                          setArticuloSeleccionado(null);
+                        } catch (error) {
+                          console.error("Error al eliminar:", error);
+                          alert("No se pudo eliminar el artículo.");
+                        }
+                      }
+                    }} className="text-white hover:text-white bg-red-600 hover:bg-red-700 border border-red-700 px-3 py-1.5 rounded transition font-semibold text-xs flex items-center gap-1.5 shadow-sm">
+                      Eliminar
+                    </button>
+                  </div>
                 )}
                 <button onClick={() => setArticuloSeleccionado(null)} className="text-slate-400 hover:text-slate-600 hover:bg-slate-200 p-2 rounded transition ml-2">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>

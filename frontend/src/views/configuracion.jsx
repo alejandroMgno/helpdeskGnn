@@ -15,6 +15,8 @@ const Configuracion = ({ user }) => {
   const [centrosCosto, setCentrosCosto] = useState([]);
   const [departamentos, setDepartamentos] = useState([]);
   const [puestos, setPuestos] = useState([]);
+  const [tecnicos, setTecnicos] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
 
   const [smtpConfig, setSmtpConfig] = useState({
     smtp_host: '', smtp_port: 587, smtp_user: '', smtp_password: '', smtp_tls: true,
@@ -33,6 +35,7 @@ const Configuracion = ({ user }) => {
   const [nuevoCC, setNuevoCC] = useState({ codigo: '', nombre: '' });
   const [nuevoDep, setNuevoDep] = useState({ nombre: '', zona_id: '', centro_costo_id: '' });
   const [nuevoPuesto, setNuevoPuesto] = useState({ nombre: '' });
+  const [nuevoAsign, setNuevoAsign] = useState({ zona_id: '', departamento_id: '', tecnico_principal_id: '', tecnico_secundario_id: '' });
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [editType, setEditType] = useState(''); // 'marca', 'proveedor', 'cat', 'zona', 'cc', 'dep', 'puesto'
@@ -72,7 +75,7 @@ const Configuracion = ({ user }) => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resMarcas, resProv, resSla, resCat, resSmtp, resZonas, resCC, resDeps, resPuestos] = await Promise.all([
+      const [resMarcas, resProv, resSla, resCat, resSmtp, resZonas, resCC, resDeps, resPuestos, resTecnicos, resAsignaciones] = await Promise.all([
         clienteAxios.get('/catalogos/marcas'),
         clienteAxios.get('/catalogos/proveedores'),
         clienteAxios.get('/catalogos/sla'),
@@ -81,7 +84,9 @@ const Configuracion = ({ user }) => {
         clienteAxios.get('/catalogos/zonas'),
         clienteAxios.get('/catalogos/centros-costo'),
         clienteAxios.get('/catalogos/departamentos'),
-        clienteAxios.get('/catalogos/puestos')
+        clienteAxios.get('/catalogos/puestos'),
+        clienteAxios.get('/usuarios'),
+        clienteAxios.get('/catalogos/asignaciones-tecnicas')
       ]);
       setMarcas(resMarcas.data);
       setProveedores(resProv.data);
@@ -92,6 +97,8 @@ const Configuracion = ({ user }) => {
       setCentrosCosto(resCC.data);
       setDepartamentos(resDeps.data);
       setPuestos(resPuestos.data);
+      setTecnicos(resTecnicos.data.filter(u => u.rol === 'Tecnico' || u.rol === 'Admin'));
+      setAsignaciones(resAsignaciones.data);
     } catch (error) {
       console.error("Error al cargar configuración:", error);
     } finally {
@@ -285,6 +292,23 @@ const Configuracion = ({ user }) => {
     }
   };
 
+  const handleCrearAsignacion = async (e) => {
+    e.preventDefault();
+    try {
+      await clienteAxios.post('/catalogos/asignaciones-tecnicas', nuevoAsign);
+      setNuevoAsign({ zona_id: '', departamento_id: '', tecnico_principal_id: '', tecnico_secundario_id: '' });
+      fetchData();
+    } catch (error) { alert("Error al crear asignación"); }
+  };
+
+  const handleEliminarAsignacion = async (id) => {
+    if (!confirm("¿Eliminar asignación?")) return;
+    try {
+      await clienteAxios.delete(`/catalogos/asignaciones-tecnicas/${id}`);
+      fetchData();
+    } catch (error) { alert("Error al eliminar."); }
+  };
+
   const renderEstructura = () => (
     <div className="space-y-8 animate-fadeIn">
       {/* Fila 1: Zonas y Centros de Costo (Bases) */}
@@ -419,6 +443,43 @@ const Configuracion = ({ user }) => {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+      
+      {/* Fila 4: Asignación Técnica */}
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+          <h3 className="text-xs font-black uppercase text-slate-600">Asignación Automática de Técnicos</h3>
+        </div>
+        <div className="p-4">
+            <form onSubmit={handleCrearAsignacion} className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-4">
+                <select required value={nuevoAsign.zona_id} onChange={e => setNuevoAsign({...nuevoAsign, zona_id: e.target.value})} className="border rounded px-2 py-1.5 text-xs">
+                    <option value="">Zona...</option>
+                    {zonas.map(z => <option key={z.id} value={z.id}>{z.nombre}</option>)}
+                </select>
+                <select required value={nuevoAsign.departamento_id} onChange={e => setNuevoAsign({...nuevoAsign, departamento_id: e.target.value})} className="border rounded px-2 py-1.5 text-xs">
+                    <option value="">Departamento...</option>
+                    {departamentos.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                </select>
+                <select required value={nuevoAsign.tecnico_principal_id} onChange={e => setNuevoAsign({...nuevoAsign, tecnico_principal_id: e.target.value})} className="border rounded px-2 py-1.5 text-xs">
+                    <option value="">Técnico Principal...</option>
+                    {tecnicos.map(t => <option key={t.id} value={t.id}>{t.nombre_completo}</option>)}
+                </select>
+                <select value={nuevoAsign.tecnico_secundario_id} onChange={e => setNuevoAsign({...nuevoAsign, tecnico_secundario_id: e.target.value})} className="border rounded px-2 py-1.5 text-xs">
+                    <option value="">Técnico Secundario...</option>
+                    {tecnicos.map(t => <option key={t.id} value={t.id}>{t.nombre_completo}</option>)}
+                </select>
+                <button type="submit" className="bg-blue-600 text-white rounded text-xs font-bold shadow-sm hover:bg-blue-700">Asignar</button>
+            </form>
+            <div className="space-y-1">
+                {asignaciones.map(a => (
+                    <div key={a.id} className="flex justify-between items-center p-2 bg-slate-50 rounded border border-slate-100 text-xs">
+                        <span>{zonas.find(z=>z.id==a.zona_id)?.nombre} - {departamentos.find(d=>d.id==a.departamento_id)?.nombre}</span>
+                        <span className="font-bold text-slate-700">P: {tecnicos.find(t=>t.id==a.tecnico_principal_id)?.nombre_completo}</span>
+                        <button onClick={() => handleEliminarAsignacion(a.id)} className="text-red-500 hover:text-red-700">✕</button>
+                    </div>
+                ))}
+            </div>
         </div>
       </div>
     </div>

@@ -1,6 +1,8 @@
 from sqlalchemy import Column, Integer, String, Float, JSON, Date, Boolean, ForeignKey, Table
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
+from app.models.documento_licencia import DocumentoLicencia
+from app.models.catalogos import Proveedor
 
 # Tabla de asociación para la relación Muchos a Muchos entre Usuarios y Licencias
 usuario_licencia = Table(
@@ -29,7 +31,7 @@ class Licencia(Base):
 
     estatus = Column(String(50), default="Activa")
     is_deleted = Column(Boolean, default=False)
-    documentos = Column(JSON, default=list)
+    documentos_relacionados = relationship("DocumentoLicencia", back_populates="licencia", cascade="all, delete-orphan")
 
     # Usamos JSON para guardar las listas dinámicas de tu frontend
     asientos_asignados = Column(JSON, default=list) 

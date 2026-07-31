@@ -170,9 +170,13 @@ def get_dashboard_stats(
     tecnicos_list_raw = db.query(Usuario).filter(Usuario.rol == RolUsuario.Tecnico, Usuario.is_active == True).all()
     tecnicos_list = []
     for tec in tecnicos_list_raw:
+        # 🔥 FIX: Contar todos los estados excepto Finales (Cerrado, Cancelado)
+        # Resuelto sigue siendo "carga de trabajo" hasta que el usuario lo cierra.
+        estatus_finales = [EstatusTicket.Cerrado, EstatusTicket.Cancelado]
+        
         carga = db.query(Ticket).filter(
             Ticket.tecnico_asignado_id == tec.id,
-            Ticket.estatus != EstatusTicket.Cerrado
+            ~Ticket.estatus.in_(estatus_finales)
         ).count()
         
         # Calificación Promedio

@@ -82,3 +82,16 @@ class ModeloParte(Base):
 
     marca = relationship("Marca")
 
+class AsignacionTecnica(Base):
+    __tablename__ = "asignaciones_tecnicas"
+    id = Column(Integer, primary_key=True, index=True)
+    zona_id = Column(Integer, ForeignKey("zonas.id"), nullable=False)
+    departamento_id = Column(Integer, ForeignKey("departamentos.id"), nullable=False)
+    tecnico_principal_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    tecnico_secundario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=True)
+    
+    zona = relationship("Zona")
+    departamento = relationship("Departamento")
+    tecnico_principal = relationship("Usuario", foreign_keys=[tecnico_principal_id])
+    tecnico_secundario = relationship("Usuario", foreign_keys=[tecnico_secundario_id])
+

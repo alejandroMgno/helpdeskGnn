@@ -6,12 +6,16 @@ from fastapi.staticfiles import StaticFiles # NUEVO: Necesario para servir los P
 from app.core.config import settings
 from app.db.database import engine
 from app.db.base_class import Base
+from app.core.logger import setup_logging, request_id_middleware # NUEVO: Logs
 
 # 1. IMPORTANTE: Importamos los modelos ANTES de create_all para que SQLAlchemy los reconozca.
-from app.models import usuario, ticket, activo, auditoria, catalogos 
+import app.models
 
 # Importamos TODAS las rutas finales
 from app.api.routes import auth, usuarios, tickets, activos, dashboard, articulos, licencias, catalogos, config
+
+# NUEVO: Inicializar logs
+setup_logging()
 
 # 2. Crea todas las tablas en base de datos
 Base.metadata.create_all(bind=engine)
@@ -20,6 +24,9 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# NUEVO: Añadir middleware de logs
+app.middleware("http")(request_id_middleware)
 
 # NUEVO: Asegurar que el directorio de uploads exista para evitar crasheos al subir el primer PDF
 os.makedirs("uploads/facturas", exist_ok=True)
@@ -32,12 +39,15 @@ origins = [
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "https://01vqbx8b-5173.usw3.devtunnels.ms/"
+
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
+    allow_origin_regex=r"https://.*\.devtunnels\.ms",
     allow_methods=["*"],
     allow_headers=["*"],
 )

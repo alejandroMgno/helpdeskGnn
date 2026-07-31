@@ -1,0 +1,13 @@
+# Docker ignore
+.env
+venv/
+__pycache__/
+.pytest_cache/
+*.db
+*.sqlite
+*.pyc
+*.pdf
+test_*.py
+.git/
+.vscode/
+.idea/

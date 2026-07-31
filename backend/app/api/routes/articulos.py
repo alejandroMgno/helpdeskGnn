@@ -48,10 +48,15 @@ def actualizar_articulo(articulo_id: int, articulo: ArticuloUpdate, db: Session 
     db.refresh(db_articulo)
     return db_articulo
 
-@router.post("/{articulo_id}/vistas")
-def incrementar_vistas(articulo_id: int, db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_user)):
+@router.delete("/{articulo_id}")
+def eliminar_articulo(articulo_id: int, db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_user)):
+    if current_user.rol == RolUsuario.Usuario:
+        raise HTTPException(status_code=403, detail="No tienes permisos para eliminar artículos")
+        
     db_articulo = db.query(Articulo).filter(Articulo.id == articulo_id).first()
-    if db_articulo:
-        db_articulo.vistas += 1
-        db.commit()
+    if not db_articulo:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+        
+    db.delete(db_articulo)
+    db.commit()
     return {"status": "ok"}

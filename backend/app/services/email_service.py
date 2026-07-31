@@ -1,14 +1,17 @@
 # backend/app/services/email_service.py
 import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
 
-def enviar_email(email_to: str, subject: str, body_html: str):
-    """Función genérica para enviar correos electrónicos usando config de DB."""
+def enviar_email(email_to: str, subject: str, body_html: str, attachment_path: str = None):
+    """Función genérica para enviar correos electrónicos con adjunto opcional."""
     from app.db.database import SessionLocal
     from app.models.config import ConfiguracionSMTP
-    
+    from email.mime.base import MIMEBase
+    from email import encoders
+
     db = SessionLocal()
     config = db.query(ConfiguracionSMTP).first()
     db.close()
@@ -32,6 +35,17 @@ def enviar_email(email_to: str, subject: str, body_html: str):
     message["Subject"] = subject
 
     message.attach(MIMEText(body_html, "html"))
+
+    if attachment_path:
+        with open(attachment_path, "rb") as attachment:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f"attachment; filename= {os.path.basename(attachment_path)}",
+            )
+            message.attach(part)
 
     try:
         server = smtplib.SMTP(smtp_host, smtp_port)
@@ -172,8 +186,8 @@ def notificar_recuperacion_password(email_to: str, password_temporal: str):
     """
     return enviar_email(email_to, subject, html)
 
-def notificar_activo_asignado(email_to: str, activo_nombre: str, codigo: str, evento: str):
-    """Envia correo al asignar/desvincular un activo."""
+def notificar_activo_asignado(email_to: str, activo: object, evento: str):
+    """Envia correo al asignar/desvincular un activo con detalles técnicos."""
     from app.db.database import SessionLocal
     from app.models.config import ConfiguracionSMTP
     db = SessionLocal()
@@ -182,18 +196,30 @@ def notificar_activo_asignado(email_to: str, activo_nombre: str, codigo: str, ev
     if config and not config.notificar_activo_asignado: return
 
     es_alta = "Asignado" in evento
-    subject = f"{'💻' if es_alta else '📤'} {evento}: {activo_nombre}"
+    subject = f"{'💻' if es_alta else '📤'} {evento}: {activo.nombre}"
+    
+    # Detalles técnicos sin costo
+    detalles_tecnicos = f"""
+    <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
+        <p><strong>Evento:</strong> {evento}</p>
+        <p><strong>Equipo:</strong> {activo.nombre}</p>
+        <p><strong>Código:</strong> {activo.codigo}</p>
+        <p><strong>Marca:</strong> {activo.marca.nombre if activo.marca else (activo.marca_texto or "N/A")}</p>
+        <p><strong>Modelo:</strong> {activo.modelo or "N/A"}</p>
+        <p><strong>Serie:</strong> {activo.serie or "N/A"}</p>
+        <p><strong>RAM:</strong> {activo.ram or "N/A"}</p>
+        <p><strong>CPU:</strong> {activo.cpu or "N/A"}</p>
+        <p><strong>Almacenamiento:</strong> {activo.almacenamiento or "N/A"}</p>
+    </div>
+    """
+
     html = f"""
     <html>
         <body style="font-family: sans-serif; color: #334155;">
             <div style="max-width: 600px; margin: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
                 <h2 style="color: #0891b2;">Movimiento de Inventario</h2>
                 <p>Se ha registrado un cambio en la asignación de equipo a su nombre.</p>
-                <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                    <p><strong>Evento:</strong> {evento}</p>
-                    <p><strong>Equipo:</strong> {activo_nombre}</p>
-                    <p><strong>Código:</strong> {codigo}</p>
-                </div>
+                {detalles_tecnicos}
                 <p>{'Por favor, verifique la recepción física del equipo.' if es_alta else 'Se ha formalizado la devolución/desvinculación del equipo.'}</p>
             </div>
         </body>

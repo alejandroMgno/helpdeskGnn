@@ -1,10 +1,31 @@
 # backend/app/services/sla_engine.py
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 from sqlalchemy.orm import Session
 from app.models.usuario import Usuario, StatusTecnico
-from app.models.ticket import PrioridadTicket # Importamos tu Enum real
-
+from app.models.ticket import PrioridadTicket, EstatusTicket, Comentario
 from app.models.catalogos import SLAConfig
+
+def es_horario_laboral(dt: datetime) -> bool:
+    """Verifica si la fecha está dentro del horario laboral (08:00 - 18:00)."""
+    hora = dt.time()
+    return time(8, 0) <= hora <= time(18, 0) and dt.weekday() < 5 # Lunes a Viernes
+
+def ajustar_a_horario_laboral(dt: datetime) -> datetime:
+    """Ajusta una fecha al próximo horario laboral si está fuera de él."""
+    if es_horario_laboral(dt):
+        return dt
+    
+    # Si es fin de semana o fuera de horario, mover al siguiente día hábil a las 08:00
+    if dt.weekday() >= 5 or dt.time() >= time(18, 0):
+        # Mover al siguiente día
+        dias_a_sumar = 1
+        while (dt + timedelta(days=dias_a_sumar)).weekday() >= 5:
+            dias_a_sumar += 1
+        dt = (dt + timedelta(days=dias_a_sumar)).replace(hour=8, minute=0, second=0, microsecond=0)
+    elif dt.time() < time(8, 0):
+        dt = dt.replace(hour=8, minute=0, second=0, microsecond=0)
+        
+    return dt
 
 def pausar_sla(ticket):
     """Registra el inicio de una pausa en el SLA del ticket."""
@@ -25,7 +46,7 @@ def reanudar_sla(ticket):
         ticket.ultima_fecha_pausa = None
 
 def calcular_vencimiento_sla(prioridad: PrioridadTicket, start_date: datetime = None, db: Session = None) -> datetime:
-    """Calcula la fecha de vencimiento basada en la prioridad y configuración de BD."""
+    """Calcula la fecha de vencimiento basada en la prioridad y configuración de BD, respetando horario laboral."""
     horas_asignadas = 24
     
     if db:
@@ -33,7 +54,6 @@ def calcular_vencimiento_sla(prioridad: PrioridadTicket, start_date: datetime = 
         if config:
             horas_asignadas = config.horas
         else:
-            # Fallback hardcoded
             horas_sla = {
                 PrioridadTicket.Critica: 2,
                 PrioridadTicket.Alta: 8,
@@ -42,7 +62,6 @@ def calcular_vencimiento_sla(prioridad: PrioridadTicket, start_date: datetime = 
             }
             horas_asignadas = horas_sla.get(prioridad, 24)
     else:
-        # Si no hay DB, usar defaults
         horas_sla = {
             PrioridadTicket.Critica: 2,
             PrioridadTicket.Alta: 8,
@@ -56,7 +75,29 @@ def calcular_vencimiento_sla(prioridad: PrioridadTicket, start_date: datetime = 
     if base_date.tzinfo is None:
         base_date = base_date.replace(tzinfo=timezone.utc)
         
+    # Ajustar a horario laboral si es necesario
+    base_date = ajustar_a_horario_laboral(base_date)
+    
     return base_date + timedelta(hours=horas_asignadas)
+
+def activar_sla_automaticamente(ticket, db: Session):
+    """Activa el SLA automáticamente si ha pasado 1 hora sin respuesta y está en horario laboral."""
+    ahora = datetime.utcnow()
+    # Si no hay primera respuesta y han pasado más de 60 minutos
+    if ticket.fecha_primera_respuesta is None and (ahora - ticket.fecha_creacion).total_seconds() > 3600:
+        if es_horario_laboral(ahora):
+            ticket.fecha_primera_respuesta = ahora
+            ticket.fecha_vencimiento_sla = calcular_vencimiento_sla(ticket.prioridad, start_date=ahora, db=db)
+            
+            log = Comentario(
+                ticket_id=ticket.id,
+                autor_id=1, # Admin por defecto para mensajes automáticos
+                texto="SISTEMA: No se recibió respuesta en 1 hora. Ticket activado automáticamente.",
+            )
+            db.add(log)
+            db.commit()
+            return True
+    return False
 
 def asignar_tecnico_inteligente(db: Session, solicitante_id: int) -> int | None:
     """

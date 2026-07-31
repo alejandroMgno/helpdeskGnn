@@ -130,3 +130,17 @@ class ModeloParteResponse(ModeloParteBase):
     marca: Optional[MarcaResponse] = None
     class Config:
         from_attributes = True
+
+class AsignacionTecnicaBase(BaseModel):
+    zona_id: int
+    departamento_id: int
+    tecnico_principal_id: int
+    tecnico_secundario_id: Optional[int] = None
+
+class AsignacionTecnicaCreate(AsignacionTecnicaBase):
+    pass
+
+class AsignacionTecnicaResponse(AsignacionTecnicaBase):
+    id: int
+    class Config:
+        from_attributes = True

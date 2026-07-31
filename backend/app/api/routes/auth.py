@@ -50,7 +50,7 @@ async def login_access_token(db: Session = Depends(get_db), form_data: OAuth2Pas
         }
     }
 
-@router.post("/verify-email/{token}")
+@router.get("/verify-email/{token}")
 async def verify_email(token: str, db: Session = Depends(get_db)):
     user = db.query(Usuario).filter(Usuario.email_verification_token == token).first()
     if not user:
