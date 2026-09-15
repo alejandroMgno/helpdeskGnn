@@ -1,15 +1,79 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# =================
+# PYTHON / FASTAPI
+# =================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
-node_modules
-dist
-dist-ssr
+# C extensions
+*.so
+
+# Distribution / packaging
+.bin/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# FastAPI / Uvicorn / Environment variables
+.env
+.env.local
+instance/
+.webassets-cache
+
+# =================
+# JAVASCRIPT / REACT / VITE
+# =================
+# Dependencies
+node_modules/
+jspm_packages/
+
+# Vite build output
+dist/
+dist-ssr/
+
+# Local development files
 *.local
 
 # Editor directories and files
@@ -22,3 +86,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+pnpm-lock.yaml -- Opcional, pero recomendado subirlo si quieres control de versiones estricto

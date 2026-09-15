@@ -46,7 +46,7 @@ async def login_access_token(db: Session = Depends(get_db), form_data: OAuth2Pas
             "email": user.email,
             "rol": user.rol,
             "debe_cambiar_password": user.debe_cambiar_password,
-            "avatar_url": f"https://ui-avatars.com/api/?name={user.nombre_completo.replace(' ', '+')}&background=0891b2&color=fff"
+            "avatar_url": user.avatar_url or f"https://ui-avatars.com/api/?name={user.nombre_completo.replace(' ', '+')}&background=0891b2&color=fff"
         }
     }
 

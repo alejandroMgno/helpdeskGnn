@@ -39,7 +39,9 @@ origins = [
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
-    "https://01vqbx8b-5173.usw3.devtunnels.ms/"
+    "https://01vqbx8b-5173.usw3.devtunnels.ms/",
+    "http://10.10.10.15:5173",
+    "http://10.10.10.15"
 
 ]
 

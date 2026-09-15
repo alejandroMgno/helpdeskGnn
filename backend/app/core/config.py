@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Zenit Service Desk API"
+    PROJECT_NAME: str = "GNN System Administration Management"
     VERSION: str = "1.0.0" 
     API_V1_STR: str = "/api/v1"
     
@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  
     
     # Base de datos
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./zenit_desk.db")
-    SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL", "sqlite:///./zenit_desk.db")
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
+    SQLALCHEMY_DATABASE_URI: str = os.getenv("DATABASE_URL")
 
     # Email
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: str = os.getenv("EMAILS_FROM_EMAIL", "alertas@tuempresa.com")
     EMAILS_FROM_NAME: str = os.getenv("EMAILS_FROM_NAME", "GNN SAM Alerts")
     
-    # Frontend URL (para links de verificación)
+    # URLs de la aplicación
+    API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
     model_config = SettingsConfigDict(case_sensitive=True)
