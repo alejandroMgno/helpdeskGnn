@@ -61,6 +61,8 @@ class UsuarioBase(BaseModel):
     ausente: Optional[bool] = False
     tecnico_principal_id: Optional[int] = None
     tecnico_secundario_id: Optional[int] = None
+    
+    avatar_url: Optional[str] = None
 
 class UsuarioCreate(UsuarioBase):
     password: str

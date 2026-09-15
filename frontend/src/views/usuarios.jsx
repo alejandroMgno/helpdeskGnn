@@ -69,20 +69,20 @@ const Usuarios = ({ user, token }) => {
   const fetchUsuarios = async () => {
     setCargando(true);
     try {
-      const headers = { 'Authorization': `Bearer ${token}` };
+      const config = { headers: { 'Authorization': `Bearer ${token}` } };
       const [resUsers, resZonas, resDeps, resPuestos, resAsign] = await Promise.all([
-        fetch('http://localhost:8000/api/v1/usuarios/', { headers }),
-        fetch('http://localhost:8000/api/v1/catalogos/zonas', { headers }),
-        fetch('http://localhost:8000/api/v1/catalogos/departamentos', { headers }),
-        fetch('http://localhost:8000/api/v1/catalogos/puestos', { headers }),
-        fetch('http://localhost:8000/api/v1/catalogos/asignaciones-tecnicas', { headers })
+        clienteAxios.get('/usuarios/', config),
+        clienteAxios.get('/catalogos/zonas', config),
+        clienteAxios.get('/catalogos/departamentos', config),
+        clienteAxios.get('/catalogos/puestos', config),
+        clienteAxios.get('/catalogos/asignaciones-tecnicas', config)
       ]);
 
-      if (resUsers.ok) setUsuarios(await resUsers.json());
-      if (resZonas.ok) setZonas(await resZonas.json());
-      if (resDeps.ok) setDepartamentos(await resDeps.json());
-      if (resPuestos.ok) setPuestos(await resPuestos.json());
-      if (resAsign.ok) setAsignaciones(await resAsign.json());
+      setUsuarios(resUsers.data);
+      setZonas(resZonas.data);
+      setDepartamentos(resDeps.data);
+      setPuestos(resPuestos.data);
+      setAsignaciones(resAsign.data);
 
     } catch (error) {
       console.error("Error al cargar datos:", error);
@@ -95,9 +95,6 @@ const Usuarios = ({ user, token }) => {
     if (token) fetchUsuarios();
   }, [token]);
 
-  // Lista de técnicos reales para los selects
-  const tecnicosDisponibles = usuarios.filter(u => u.rol === 'Tecnico' || u.rol === 'Admin');
-
   // --- ACCIONES POST/PUT ---
   const handleAltaUsuario = async (e) => {
     e.preventDefault();
@@ -106,38 +103,28 @@ const Usuarios = ({ user, token }) => {
     }
 
     try {
-      // Limpiar campos vacíos antes de enviar
       const dataToSend = { ...formNuevoUsuario };
       Object.keys(dataToSend).forEach(key => {
         if (dataToSend[key] === '') dataToSend[key] = null;
       });
-      // Asegurarse de que los IDs sean números si no son null
       if (dataToSend.tecnico_principal_id) dataToSend.tecnico_principal_id = parseInt(dataToSend.tecnico_principal_id);
       if (dataToSend.tecnico_secundario_id) dataToSend.tecnico_secundario_id = parseInt(dataToSend.tecnico_secundario_id);
       if (dataToSend.edad) dataToSend.edad = parseInt(dataToSend.edad);
       
-      const response = await fetch('http://localhost:8000/api/v1/usuarios/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(dataToSend)
+      await clienteAxios.post('/usuarios/', dataToSend, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (response.ok) {
-        alert("Usuario creado con éxito");
-        fetchUsuarios();
-        setMostrarModalAlta(false);
-        setFormNuevoUsuario(formInicial);
-      } else {
-        const err = await response.json();
-        alert(`Error: ${err.detail}`);
-      }
+      alert("Usuario creado con éxito");
+      fetchUsuarios();
+      setMostrarModalAlta(false);
+      setFormNuevoUsuario(formInicial);
     } catch (error) {
-      alert("Error de conexión.");
+      alert(`Error: ${error.response?.data?.detail || "Error de conexión."}`);
     }
   };
 
   const abrirModalEdicion = (usuario) => {
-    // Normalizar horarios si no existen (ej: usuarios viejos)
     const horariosNormalizados = DIAS_SEMANA.map(dia => {
       const hExistente = usuario.horarios?.find(xh => xh.dia_semana === dia.id);
       return hExistente || {
@@ -149,7 +136,6 @@ const Usuarios = ({ user, token }) => {
         hora_fin_2: '18:00'
       };
     });
-    // Limpiamos el campo password al abrir para que solo se envíe si el admin lo llena
     setFormEditarUsuario({ ...usuario, password: '', horarios: horariosNormalizados });
     setMostrarModalEditar(true);
   };
@@ -161,34 +147,24 @@ const Usuarios = ({ user, token }) => {
     }
 
     try {
-      // Limpiar campos vacíos antes de enviar
       const dataToSend = { ...formEditarUsuario };
       Object.keys(dataToSend).forEach(key => {
         if (dataToSend[key] === '') dataToSend[key] = null;
       });
-      // Asegurarse de que los IDs sean números si no son null
       if (dataToSend.tecnico_principal_id) dataToSend.tecnico_principal_id = parseInt(dataToSend.tecnico_principal_id);
       if (dataToSend.tecnico_secundario_id) dataToSend.tecnico_secundario_id = parseInt(dataToSend.tecnico_secundario_id);
       if (dataToSend.edad) dataToSend.edad = parseInt(dataToSend.edad);
-      // Limpiar password si está vacío para no enviarlo
       if (!dataToSend.password) delete dataToSend.password;
 
-      const response = await fetch(`http://localhost:8000/api/v1/usuarios/${formEditarUsuario.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(dataToSend)
+      await clienteAxios.put(`/usuarios/${formEditarUsuario.id}/`, dataToSend, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      if (response.ok) {
-        fetchUsuarios();
-        setMostrarModalEditar(false);
-        if (usuarioSeleccionado?.id === formEditarUsuario.id) setUsuarioSeleccionado(null);
-      } else {
-        const err = await response.json();
-        alert(`Error: ${err.detail}`);
-      }
+      fetchUsuarios();
+      setMostrarModalEditar(false);
+      if (usuarioSeleccionado?.id === formEditarUsuario.id) setUsuarioSeleccionado(null);
     } catch (error) {
-      alert("Error al actualizar.");
+      alert(`Error: ${error.response?.data?.detail || "Error al actualizar."}`);
     }
   };
 
@@ -198,10 +174,8 @@ const Usuarios = ({ user, token }) => {
     const nuevoEstatus = usuario.estatus === 'Activo' ? 'Inactivo' : 'Activo';
 
     try {
-      await fetch(`http://localhost:8000/api/v1/usuarios/${usuario.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ estatus: nuevoEstatus })
+      await clienteAxios.put(`/usuarios/${usuario.id}/`, { estatus: nuevoEstatus }, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       fetchUsuarios();
     } catch (error) {
@@ -211,21 +185,17 @@ const Usuarios = ({ user, token }) => {
 
   const handleExportarExcel = async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/usuarios/export/excel', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await clienteAxios.get('/usuarios/export/excel/', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        responseType: 'blob'
       });
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `directorio_gnn_${new Date().toISOString().split('T')[0]}.xlsx`);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      } else {
-        alert("Error al exportar Excel");
-      }
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `directorio_gnn_${new Date().toISOString().split('T')[0]}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     } catch (err) { alert("Error de conexión al exportar."); }
   };
 
@@ -237,26 +207,20 @@ const Usuarios = ({ user, token }) => {
     formData.append('file', file);
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/usuarios/import/excel', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
+      const response = await clienteAxios.post('/usuarios/import/excel/', formData, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'multipart/form-data' }
       });
-      const data = await response.json();
-      if (response.ok) {
-        if (data.errores.length > 0) {
-          alert(`Importación completada con ${data.importados} usuarios. Errores: \n${data.errores.join('\n')}`);
-        } else {
-          alert(`¡Éxito! Se importaron ${data.importados} usuarios.`);
-        }
-        fetchUsuarios();
+      const data = response.data;
+      if (data.errores.length > 0) {
+        alert(`Importación completada con ${data.importados} usuarios. Errores: \n${data.errores.join('\n')}`);
       } else {
-        alert(data.detail || "Error al importar Excel");
+        alert(`¡Éxito! Se importaron ${data.importados} usuarios.`);
       }
+      fetchUsuarios();
     } catch (err) {
-      alert("Error de conexión al importar.");
+      alert(err.response?.data?.detail || "Error al importar Excel");
     } finally {
-      e.target.value = ''; // Limpiar input
+      e.target.value = '';
     }
   };
 
@@ -1041,18 +1005,12 @@ const Usuarios = ({ user, token }) => {
                   <button 
                     onClick={async () => {
                       try {
-                        const response = await fetch(`http://localhost:8000/api/v1/usuarios/${usuarioSeleccionado.id}/resend-verification`, {
-                          method: 'POST',
+                        await clienteAxios.post(`/usuarios/${usuarioSeleccionado.id}/resend-verification`, {}, {
                           headers: { 'Authorization': `Bearer ${token}` }
                         });
-                        if (response.ok) {
-                          alert("Correo de verificación reenviado exitosamente.");
-                        } else {
-                          const err = await response.json();
-                          alert(`Error: ${err.detail}`);
-                        }
+                        alert("Correo de verificación reenviado exitosamente.");
                       } catch (error) {
-                        alert("Error de conexión al reenviar correo.");
+                        alert(`Error: ${error.response?.data?.detail || "Error de conexión al reenviar correo."}`);
                       }
                     }}
                     className="mt-2 w-full bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-xs py-2 px-4 rounded border border-amber-200 transition-colors shadow-sm"

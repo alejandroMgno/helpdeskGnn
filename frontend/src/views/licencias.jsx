@@ -471,7 +471,7 @@ const Licencias = ({ user, token }) => {
                                             <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Documentos Adjuntos ({licenciaSeleccionada.documentos.length})</p>
                                             <div className="flex flex-wrap gap-2">
                                                 {licenciaSeleccionada.documentos.map((doc, idx) => (
-                                                    <a key={idx} href={`http://localhost:8000/${doc}`} target="_blank" rel="noopener noreferrer" className="bg-white border border-blue-200 p-2 rounded-lg text-[9px] font-bold text-blue-700 flex items-center gap-2 hover:bg-blue-100 transition shadow-sm">
+                                                    <a key={idx} href={`http://${window.location.hostname}:8000/${doc}`} target="_blank" rel="noopener noreferrer" className="bg-white border border-blue-200 p-2 rounded-lg text-[9px] font-bold text-blue-700 flex items-center gap-2 hover:bg-blue-100 transition shadow-sm">
                                                         <i className="pi pi-file-pdf"></i> VER DOC {idx + 1}
                                                     </a>
                                                 ))}
@@ -561,7 +561,7 @@ const Licencias = ({ user, token }) => {
                                     )}
                                     <div className="space-y-2">
                                         {licenciaSeleccionada.documentos.map((doc, idx) => (
-                                            <a key={idx} href={`http://localhost:8000/${doc}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm">
+                                            <a key={idx} href={`http://${window.location.hostname}:8000/${doc}`} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-sm">
                                                 <div className="flex items-center gap-3">
                                                     <i className="pi pi-file-pdf text-red-500"></i>
                                                     <span className="text-[10px] font-black text-slate-700 uppercase">{doc.split('/').pop().substring(0, 25)}...</span>
@@ -714,3 +714,4 @@ const Licencias = ({ user, token }) => {
 };
 
 export default Licencias;
+

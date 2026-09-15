@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import clienteAxios from '../api/axios';
 
 const Perfil = ({ token, user, setUser }) => {
   // Estados para el formulario de contraseña
@@ -10,7 +11,16 @@ const Perfil = ({ token, user, setUser }) => {
 
   // Estados para la carga e imagen
   const [imagenSeleccionada, setImagenSeleccionada] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(user?.avatar_url || null);
+  
+  // Función auxiliar para obtener la URL completa del avatar
+  const getFullAvatarUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    const baseUrl = clienteAxios.defaults.baseURL.replace(/\/api\/v1$/, '');
+    return `${baseUrl}${url}`;
+  };
+
+  const [previewUrl, setPreviewUrl] = useState(getFullAvatarUrl(user?.avatar_url) || null);
   const [cargando, setCargando] = useState(false);
   const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
 
@@ -25,34 +35,29 @@ const Perfil = ({ token, user, setUser }) => {
 
     setCargando(true);
     try {
-      // Ajusta esta URL a tu endpoint real
-      const response = await fetch('http://localhost:8000/api/v1/usuarios/password', {
-        method: 'PUT',
+      const response = await clienteAxios.put('/usuarios/password', {
+        password_actual: formPasswords.actual,
+        password_nueva: formPasswords.nueva
+      }, {
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          password_actual: formPasswords.actual,
-          password_nueva: formPasswords.nueva
-        })
+        }
       });
 
-      if (response.ok) {
+      if (response.status === 200) {
         setMensaje({ tipo: 'exito', texto: 'Contraseña actualizada correctamente.' });
         setFormPasswords({ actual: '', nueva: '', confirmacion: '' });
       } else {
-        const errorData = await response.json();
-        setMensaje({ tipo: 'error', texto: errorData.detail || 'Error al cambiar la contraseña.' });
+        setMensaje({ tipo: 'error', texto: 'Error al cambiar la contraseña.' });
       }
     } catch (error) {
-      setMensaje({ tipo: 'error', texto: 'Error de conexión con el servidor.' });
+      setMensaje({ tipo: 'error', texto: error.response?.data?.detail || 'Error al cambiar la contraseña.' });
     } finally {
       setCargando(false);
     }
   };
 
-  // 2. LÓGICA PARA SELECCIÓN Y SUBIDA DE IMAGEN
+// 2. LÓGICA PARA SELECCIÓN Y SUBIDA DE IMAGEN
   const handleSeleccionarImagen = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -73,45 +78,46 @@ const Perfil = ({ token, user, setUser }) => {
     formData.append('file', imagenSeleccionada);
 
     try {
-      // Ajusta esta URL a tu endpoint real de subida de avatares
-      const response = await fetch('http://localhost:8000/api/v1/usuarios/avatar', {
-        method: 'POST',
+      const response = await clienteAxios.post(`/usuarios/${user.id}/avatar`, formData, {
         headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (response.status === 200) {
         setMensaje({ tipo: 'exito', texto: 'Imagen de perfil actualizada.' });
-        // Actualizar el contexto del usuario global si la API devuelve la nueva URL
-        if (data.avatar_url && setUser) {
-          setUser({ ...user, avatar_url: data.avatar_url });
+        
+        // La URL que devuelve el backend es relativa, p. ej. "/uploads/avatars/..."
+        // Necesitamos construir la URL absoluta para el frontend
+        const baseUrl = clienteAxios.defaults.baseURL.replace(/\/api\/v1$/, '');
+        const newAvatarUrl = `${baseUrl}${response.data.avatar_url}?t=${new Date().getTime()}`;
+        
+        if (setUser) {
+          setUser({ ...user, avatar_url: newAvatarUrl });
         }
         setImagenSeleccionada(null); // Resetear tras subir
       } else {
         setMensaje({ tipo: 'error', texto: 'Error al subir la imagen.' });
       }
     } catch (error) {
-      setMensaje({ tipo: 'error', texto: 'Error de conexión.' });
+      setMensaje({ tipo: 'error', texto: error.response?.data?.detail || 'Error de conexión.' });
     } finally {
       setCargando(false);
     }
   };
 
   return (
-    <div className="w-full max-w-3xl font-sans animate-in fade-in duration-700">
+    <div className="w-full max-w-3xl mx-auto px-4 py-6 font-sans animate-in fade-in duration-700">
 
-      {/* HEADER CLARO */}
-      <header className="mb-8 border-b border-slate-200 pb-4">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Mi Perfil</h1>
-        <p className="text-sm text-slate-500 font-medium mt-1">Gestión de cuenta, seguridad y preferencias.</p>
+      {/* HEADER */}
+      <header className="mb-6 border-b border-slate-200 pb-4">
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">Mi Perfil</h1>
+        <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">Gestión de cuenta, seguridad y preferencias.</p>
       </header>
 
       {/* MENSAJES DE ALERTA */}
       {mensaje.texto && (
-        <div className={`p-4 rounded-lg mb-6 text-sm font-semibold border ${mensaje.tipo === 'exito' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+        <div className={`p-3 rounded-lg mb-4 text-xs sm:text-sm font-semibold border ${mensaje.tipo === 'exito' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
           {mensaje.texto}
         </div>
       )}
@@ -120,10 +126,10 @@ const Perfil = ({ token, user, setUser }) => {
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
 
         {/* SECCIÓN 1: DATOS E IMAGEN */}
-        <div className="p-8 border-b border-slate-200 flex flex-col sm:flex-row items-center gap-8 bg-slate-50">
+        <div className="p-5 sm:p-8 border-b border-slate-200 flex flex-col items-center sm:flex-row sm:items-start gap-6 bg-slate-50">
 
           <div className="relative group flex-shrink-0">
-            <div className="w-28 h-28 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center font-bold text-4xl text-slate-400 shadow-sm overflow-hidden">
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full bg-white border-2 border-slate-200 flex items-center justify-center font-bold text-3xl sm:text-4xl text-slate-400 shadow-sm overflow-hidden">
               {previewUrl ? (
                 <img src={previewUrl} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
@@ -137,46 +143,30 @@ const Perfil = ({ token, user, setUser }) => {
             </label>
           </div>
 
-          <div className="flex-1 text-center sm:text-left">
-            <h2 className="text-2xl font-bold text-slate-800">{user?.nombre_completo || 'Usuario'}</h2>
-            <p className="text-blue-600 font-medium text-sm mt-1">{user?.email}</p>
+          <div className="flex-1 text-center sm:text-left w-full">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-800">{user?.nombre_completo || 'Usuario'}</h2>
+            <p className="text-blue-600 font-medium text-xs sm:text-sm mt-1 break-words">{user?.email}</p>
             
             {/* FICHA TÉCNICA RÁPIDA */}
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-2 gap-x-4 text-xs">
+            <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 gap-y-3 gap-x-4 text-[10px] sm:text-xs">
               <div className="flex flex-col">
                 <span className="text-slate-400 font-bold uppercase tracking-wider">Empresa</span>
-                <span className="text-slate-700 font-semibold">{user?.empresa || 'N/A'}</span>
+                <span className="text-slate-700 font-semibold truncate">{user?.empresa || 'N/A'}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-slate-400 font-bold uppercase tracking-wider">Nº Empleado</span>
-                <span className="text-slate-700 font-semibold">{user?.no_empleado || 'N/A'}</span>
+                <span className="text-slate-700 font-semibold truncate">{user?.no_empleado || 'N/A'}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-slate-400 font-bold uppercase tracking-wider">Puesto</span>
-                <span className="text-slate-700 font-semibold">{user?.puesto || 'N/A'}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-slate-400 font-bold uppercase tracking-wider">Departamento</span>
-                <span className="text-slate-700 font-semibold">{user?.departamento || 'N/A'}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-slate-400 font-bold uppercase tracking-wider">Centro de Costo</span>
-                <span className="text-slate-700 font-semibold">{user?.centro_costo || 'N/A'}</span>
-              </div>
-              <div className="flex flex-col">
-                <span className="text-slate-400 font-bold uppercase tracking-wider">RFC / CURP</span>
-                <span className="text-slate-700 font-semibold">{user?.rfc || 'N/A'} / {user?.curp || 'N/A'}</span>
+                <span className="text-slate-700 font-semibold truncate">{user?.puesto || 'N/A'}</span>
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap justify-center sm:justify-start gap-2">
-              <span className="bg-slate-200 text-slate-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">{user?.rol || 'Rol'}</span>
-            </div>
-
-            {/* Botón de guardar imagen (solo aparece si seleccionas una nueva) */}
+            {/* Botón de guardar imagen */}
             {imagenSeleccionada && (
               <div className="mt-4">
-                <button onClick={handleSubirImagen} disabled={cargando} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-semibold transition shadow-sm disabled:opacity-50">
+                <button onClick={handleSubirImagen} disabled={cargando} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded text-xs font-semibold transition shadow-sm disabled:opacity-50">
                   {cargando ? 'Guardando...' : 'Guardar Nueva Foto'}
                 </button>
               </div>
@@ -185,57 +175,55 @@ const Perfil = ({ token, user, setUser }) => {
         </div>
 
         {/* SECCIÓN 2: FORMULARIO DE CONTRASEÑA */}
-        <div className="p-8">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+        <div className="p-5 sm:p-8">
+          <h3 className="text-base sm:text-lg font-bold text-slate-800 mb-5 flex items-center gap-2">
             <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7a4 4 0 00-8 0v4h8z"></path></svg>
             Cambiar Contraseña
           </h3>
 
-          <form onSubmit={handleCambioPassword} className="space-y-5 max-w-md">
+          <form onSubmit={handleCambioPassword} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Contraseña Actual</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Contraseña Actual</label>
               <input
                 type="password"
                 required
                 value={formPasswords.actual}
                 onChange={(e) => setFormPasswords({ ...formPasswords, actual: e.target.value })}
-                className="w-full bg-white border border-slate-300 text-slate-800 px-4 py-2.5 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-sm"
+                className="w-full bg-white border border-slate-300 text-slate-800 px-3 py-2 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Nueva Contraseña</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nueva Contraseña</label>
               <input
                 type="password"
                 required
                 minLength="8"
                 value={formPasswords.nueva}
                 onChange={(e) => setFormPasswords({ ...formPasswords, nueva: e.target.value })}
-                className="w-full bg-white border border-slate-300 text-slate-800 px-4 py-2.5 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-sm"
+                className="w-full bg-white border border-slate-300 text-slate-800 px-3 py-2 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Confirmar Nueva Contraseña</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Confirmar Nueva Contraseña</label>
               <input
                 type="password"
                 required
                 minLength="8"
                 value={formPasswords.confirmacion}
                 onChange={(e) => setFormPasswords({ ...formPasswords, confirmacion: e.target.value })}
-                className="w-full bg-white border border-slate-300 text-slate-800 px-4 py-2.5 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-sm"
+                className="w-full bg-white border border-slate-300 text-slate-800 px-3 py-2 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
               />
             </div>
 
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={cargando}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-6 py-2.5 rounded-lg font-semibold text-sm transition shadow-sm w-full sm:w-auto"
-              >
-                {cargando ? 'Procesando...' : 'Actualizar Contraseña'}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={cargando}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white py-2.5 rounded-lg font-semibold text-sm transition shadow-sm"
+            >
+              {cargando ? 'Procesando...' : 'Actualizar Contraseña'}
+            </button>
           </form>
         </div>
 

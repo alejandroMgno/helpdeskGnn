@@ -1,6 +1,8 @@
 # backend/app/api/routes/usuarios.py
 import pandas as pd
 import io
+import os
+import uuid
 from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -13,6 +15,7 @@ from app.services.email_service import enviar_email
 from app.core.config import settings
 from datetime import datetime
 from app.services.websocket_manager import manager
+from app.services.image_processor import compress_image
 
 router = APIRouter()
 
@@ -302,4 +305,44 @@ async def resend_verification_email(
     background_tasks.add_task(enviar_email, usuario.email, "Activa tu cuenta", html)
     
     return {"message": "Correo de verificación enviado"}
+
+@router.post("/{usuario_id}/avatar")
+async def upload_avatar(
+    usuario_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user)
+):
+    """Subir y actualizar el avatar de un usuario."""
+    
+    # 1. Verificar usuario
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # 2. Validar formato de imagen
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser una imagen.")
+
+    # 3. Preparar directorio de guardado
+    upload_dir = "uploads/avatars"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_extension = os.path.splitext(file.filename)[1]
+    file_name = f"{uuid.uuid4()}{file_extension}"
+    file_path = os.path.join(upload_dir, file_name)
+
+    # 4. Procesar y guardar imagen
+    contents = await file.read()
+    success = compress_image(contents, file_path)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Error al procesar la imagen.")
+
+    # 5. Actualizar modelo
+    usuario.avatar_url = f"/{file_path}"
+    db.commit()
+    db.refresh(usuario)
+    
+    return {"message": "Avatar actualizado", "avatar_url": usuario.avatar_url}
 

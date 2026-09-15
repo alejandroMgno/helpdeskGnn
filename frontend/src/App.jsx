@@ -170,6 +170,15 @@ function App() {
 
   // Función para obtener iniciales del usuario
   const getIniciales = (nombre) => nombre ? nombre.substring(0, 2).toUpperCase() : 'U';
+  
+  // Función para obtener la URL del avatar correctamente
+  const getAvatarUrl = (user) => {
+    if (!user.avatar_url) return null;
+    if (user.avatar_url.startsWith('http')) return user.avatar_url;
+    // Si es una ruta relativa, prepend base URL
+    const baseUrl = clienteAxios.defaults.baseURL.replace(/\/api\/v1$/, '');
+    return `${baseUrl}${user.avatar_url}`;
+  };
 
   // Formatear el nombre de la vista para el Header (ej. "mesaAyuda" -> "Mesa Ayuda")
   const nombreVistaMapeado = vista.replace(/([A-Z])/g, ' $1').trim();
@@ -201,7 +210,6 @@ function App() {
 
           {/* Menú de Usuario Derecho */}
           <div className="flex items-center gap-4">
-            {/* <-- 3. AGREGAMOS EL onClick AL BOTÓN DEL USUARIO --> */}
             <button
               onClick={() => setVista('perfil')}
               className="flex items-center gap-2 hover:bg-slate-50 p-1.5 pr-2 rounded-md transition border border-transparent group"
@@ -212,7 +220,7 @@ function App() {
               <div className="w-7 h-7 rounded-full bg-slate-200 overflow-hidden flex items-center justify-center text-slate-600 font-bold text-xs border border-slate-300">
                 {/* Mostramos la foto real si existe, si no, las iniciales */}
                 {user.avatar_url ? (
-                  <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                  <img src={getAvatarUrl(user)} alt="Avatar" className="w-full h-full object-cover" />
                 ) : (
                   getIniciales(user.nombre_completo)
                 )}

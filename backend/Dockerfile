@@ -22,8 +22,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar el código fuente
 COPY . .
 
+# Crear y dar permisos al script de entrada
+RUN echo '#!/bin/sh\n\
+echo "Running migrations..."\n\
+alembic upgrade head\n\
+echo "Starting application..."\n\
+exec gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000' > entrypoint.sh && \
+    chmod +x entrypoint.sh
+
 # Exponer el puerto
 EXPOSE 8000
 
-# Comando para iniciar la aplicación (con Gunicorn/Uvicorn)
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "app.main:app", "--bind", "0.0.0.0:8000"]
+# Usar el script de entrada
+ENTRYPOINT ["./entrypoint.sh"]

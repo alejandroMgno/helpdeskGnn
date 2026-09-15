@@ -191,7 +191,7 @@ const MesaAyuda = ({ user }) => {
     const connectGlobalWS = () => {
       if (!user?.id) return;
       
-      const wsUrl = `ws://${window.location.hostname}:8000/api/v1/tickets/ws/notifications/${user.id}`;
+      const wsUrl = `ws://${window.location.hostname}/api/v1/tickets/ws/notifications/${user.id}`;
       wsGlobal.current = new WebSocket(wsUrl);
 
       wsGlobal.current.onopen = () => console.log("MesaAyuda: Global WS Conectado ✅");
@@ -228,7 +228,7 @@ const MesaAyuda = ({ user }) => {
   useEffect(() => {
     if (ticketSeleccionado) {
       if (ws.current) ws.current.close();
-      const socketUrl = `ws://${window.location.hostname}:8000/api/v1/tickets/ws/${ticketSeleccionado.id}`;
+      const socketUrl = `ws://${window.location.hostname}/api/v1/tickets/ws/${ticketSeleccionado.id}`;
       ws.current = new WebSocket(socketUrl);
       
       ws.current.onmessage = (event) => {
@@ -718,9 +718,9 @@ const MesaAyuda = ({ user }) => {
                     {c.adjunto_url && (
                         <div className="mt-2">
                             {['.jpg', '.jpeg', '.png', '.gif'].some(ext => c.adjunto_nombre.toLowerCase().endsWith(ext)) ? (
-                                <img src={`http://localhost:8000/${c.adjunto_url.replace('\\', '/')}`} alt="adjunto" className="max-w-full rounded border" />
+                                <img src={`http://${window.location.hostname}:8000/${c.adjunto_url.replace('\\', '/')}`} alt="adjunto" className="max-w-full rounded border" />
                             ) : (
-                                <a href={`http://localhost:8000/${c.adjunto_url.replace('\\', '/')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">📁 {c.adjunto_nombre}</a>
+                                <a href={`http://10.10.10.15:8000/${c.adjunto_url.replace('\\', '/')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">📁 {c.adjunto_nombre}</a>
                             )}
                         </div>
                     )}
